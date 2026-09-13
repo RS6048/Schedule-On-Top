@@ -387,7 +387,15 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.add(Box.createVerticalGlue());
 
         modeTabs.addTab("课表", tabSchedule);
-        modeTabs.addTab("设置", tabSettings);
+
+        // 设置面板内容较多（含自动更新区块），包一层滚动面板，防止超出窗口高度显示不全
+        JScrollPane settingsScroll = new JScrollPane(tabSettings);
+        settingsScroll.setBorder(null);
+        settingsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        settingsScroll.getVerticalScrollBar().setUnitIncrement(16);
+        settingsScroll.getViewport().setOpaque(false);
+        modeTabs.addTab("设置", settingsScroll);
+
         modeTabs.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         controlPanel.add(modeTabs, BorderLayout.CENTER);
 
