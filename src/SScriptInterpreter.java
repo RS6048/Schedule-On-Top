@@ -1217,7 +1217,7 @@ public class SScriptInterpreter {
      * <p>支持的宏：</p>
      * <ul>
      *   <li>{@code %date%} — MM.dd</li>
-     *   <li>{@code %time%} — HH:mm</li>
+     *   <li>{@code %time%} — HH:mm:ss</li>
      *   <li>{@code %day%} — 星期几数字（1=周一）</li>
      *   <li>{@code %dayname%} — 星期几中文</li>
      *   <li>{@code %month%} — 月份</li>
@@ -1230,20 +1230,21 @@ public class SScriptInterpreter {
      * </ul>
      */
     private String expandMacros(String line) {
-        if (ctx.date != null) {
-            line = line.replace("%date%", ctx.date.format(DateTimeFormatter.ofPattern("MM.dd")));
-            line = line.replace("%day%", String.valueOf(ctx.date.getDayOfWeek().getValue()));
-            line = line.replace("%dayname%", dayName(ctx.date.getDayOfWeek().getValue()));
-            line = line.replace("%month%", String.valueOf(ctx.date.getMonthValue()));
-            line = line.replace("%dayofmonth%", String.valueOf(ctx.date.getDayOfMonth()));
-            line = line.replace("%year%", String.valueOf(ctx.date.getYear()));
-        }
-        if (ctx.time != null) {
-            line = line.replace("%time%", ctx.time.format(DateTimeFormatter.ofPattern("HH:mm:ss")));
-            line = line.replace("%hour%", String.valueOf(ctx.time.getHour()));
-            line = line.replace("%minute%", String.valueOf(ctx.time.getMinute()));
-            line = line.replace("%second%", String.valueOf(ctx.time.getSecond()));
-        }
+        // 时间/日期宏始终取当前实时时间（叠加时间偏移），不依赖 reload 时的 ctx 快照，
+        // 保证 tick.txt 每秒执行时 %time%/%second% 等都是“现在”
+        java.time.LocalDateTime nowDt = java.time.LocalDateTime.now().plusSeconds(Main.timeOffsetSeconds);
+        LocalDate date = nowDt.toLocalDate();
+        LocalTime time = nowDt.toLocalTime();
+        line = line.replace("%date%", date.format(DateTimeFormatter.ofPattern("MM.dd")));
+        line = line.replace("%day%", String.valueOf(date.getDayOfWeek().getValue()));
+        line = line.replace("%dayname%", dayName(date.getDayOfWeek().getValue()));
+        line = line.replace("%month%", String.valueOf(date.getMonthValue()));
+        line = line.replace("%dayofmonth%", String.valueOf(date.getDayOfMonth()));
+        line = line.replace("%year%", String.valueOf(date.getYear()));
+        line = line.replace("%time%", time.format(DateTimeFormatter.ofPattern("HH:mm:ss")));
+        line = line.replace("%hour%", String.valueOf(time.getHour()));
+        line = line.replace("%minute%", String.valueOf(time.getMinute()));
+        line = line.replace("%second%", String.valueOf(time.getSecond()));
         line = line.replace("%week%", String.valueOf(ctx.weekTurn));
         return line;
     }
