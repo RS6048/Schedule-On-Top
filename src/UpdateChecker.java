@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
 
 /**
  * 自动更新检查器。
@@ -19,7 +21,7 @@ import java.util.regex.Pattern;
  * 并尝试用 javac 重新编译到 {@code out/production/ScrollSched}（IDEA 输出布局）。
  * 更新后需重启程序生效。</p>
  *
- * <p>镜像配置：项目根 {@code mirror.txt} 存放 raw 根地址（UTF-8 单行）——
+ * <p>镜像配置：项目根 {@code data/mirror.txt} 存放 raw 根地址（UTF-8 单行）——
  * 为空时使用默认 GitHub raw；可填 gitee raw 根（如
  * {@code https://gitee.com/xxx/ScrollSched/raw/main}）或代理前缀拼接默认地址
  * （如 {@code https://ghproxy.net/https://raw.githubusercontent.com/xxx/ScrollSched/main}）。
@@ -41,11 +43,11 @@ public class UpdateChecker {
             "https://mirror.ghproxy.com/"
     };
 
-    private static final File MIRROR_FILE = new File("./mirror.txt");
-    private static final File VERSION_FILE = new File("./version.txt");
+    private static final File MIRROR_FILE = new File("./data/mirror.txt");
+    private static final File VERSION_FILE = new File("./data/version.txt");
 
     /** 当前程序版本（与推送的 version.json 一致）。 */
-    public static final String LOCAL_VERSION = "1.0.0";
+    public static final String LOCAL_VERSION = "1.1.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
@@ -257,7 +259,7 @@ public class UpdateChecker {
         String home = System.getProperty("java.home", "");
         File[] candidates = {
                 new File(home, "bin/javac.exe"),
-                new File(home, "../bin/javac.exe"), // JRE 场景：java.home 指向 jre 时回退到 jdk/bin
+                new File(home, "../bin/javac.exe"),
         };
         for (File f : candidates) {
             if (f.exists()) {
@@ -277,7 +279,10 @@ public class UpdateChecker {
     // ===== 主流程 =====
 
     /**
-     * 自动更新主流程（供后台线程调用）：检查 → 有新版则下载 → 重新编译 → 更新本地版本。
+     * 自动更新主流程（供后台线程调用）：检查 → 有新版则<b>弹窗由用户手动确认</b> →
+     * 确认后下载 → 重新编译 → 自动打包 jar → 更新本地版本。
+     *
+     * <p>即“自动检测，手动确认”：发现新版不会直接下载，先弹确认框；用户选“否”则放弃本次更新。</p>
      *
      * @return 面向用户的结果描述文案
      */
@@ -290,13 +295,43 @@ public class UpdateChecker {
         if (compareVersion(info.version, local) <= 0) {
             return "当前已是最新版本 v" + local;
         }
+
+        // 检测到新版 → 弹确认框，用户手动选择是否下载
+        final String detectedVersion = info.version;
+        final String detectedNote = info.note;
+        final int[] choice = new int[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                StringBuilder msg = new StringBuilder();
+                msg.append("发现新版本 v").append(detectedVersion);
+                if (!detectedNote.isEmpty()) {
+                    msg.append("\n").append(detectedNote);
+                }
+                msg.append("\n\n是否现在下载更新？（更新完成后需重启程序生效）");
+                choice[0] = JOptionPane.showConfirmDialog(null, msg.toString(),
+                        "发现更新", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            });
+        } catch (Exception e) {
+            return "更新确认弹窗失败: " + e.getMessage();
+        }
+        if (choice[0] != JOptionPane.YES_OPTION) {
+            return "已取消更新（检测到新版 v" + detectedVersion + "，未下载）";
+        }
+
         try {
             downloadUpdate(info);
             String compile = recompile();
+            String jarMsg = "";
+            if (compile.startsWith("编译成功")) {
+                jarMsg = packageJar();
+            }
             Files.write(VERSION_FILE.toPath(), info.version.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
-            sb.append("已更新到 v").append(info.version).append("（").append(compile).append("）。");
-            sb.append("请重启程序生效。");
+            sb.append("已更新到 v").append(info.version).append("（").append(compile);
+            if (jarMsg != null && !jarMsg.isEmpty()) {
+                sb.append("；").append(jarMsg);
+            }
+            sb.append("）。请重启程序生效。");
             if (!info.note.isEmpty()) {
                 sb.append("\n更新说明：").append(info.note);
             }
@@ -304,6 +339,76 @@ public class UpdateChecker {
         } catch (Exception e) {
             return "更新失败: " + e.getMessage();
         }
+    }
+
+    /**
+     * 编译成功后自动打包可运行 jar：{@code jar cfe sc.jar Main -C out/production/ScrollSched .}。
+     * 打包失败（找不到 jar 工具等）不阻断主流程，仅返回描述。
+     *
+     * @return 打包结果描述
+     */
+    public static String packageJar() {
+        File outDir = new File("out/production/ScrollSched");
+        if (!outDir.exists()) {
+            return "未打包 jar：class 目录不存在";
+        }
+        File jarTool = findJar();
+        if (jarTool == null) {
+            return "未找到 jar 工具，跳过打包";
+        }
+        File target = new File("sc.jar");
+        List<String> cmd = new ArrayList<>();
+        cmd.add(jarTool.getAbsolutePath());
+        cmd.add("cfe");
+        cmd.add(target.getAbsolutePath());
+        cmd.add("Main");
+        cmd.add("-C");
+        cmd.add(outDir.getAbsolutePath());
+        cmd.add(".");
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    sb.append(line).append('\n');
+                }
+            }
+            int code = p.waitFor();
+            if (code == 0) {
+                return "已打包 sc.jar";
+            }
+            return "打 jar 失败(exit=" + code + ")：\n" + sb.toString().trim();
+        } catch (Exception e) {
+            return "打 jar 失败: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 定位 JDK 自带的 jar 工具（与 {@link #findJavac()} 同序查找）。
+     *
+     * @return jar 可执行文件；找不到返回 null
+     */
+    private static File findJar() {
+        String home = System.getProperty("java.home", "");
+        File[] candidates = {
+                new File(home, "bin/jar.exe"),
+                new File(home, "../bin/jar.exe"),
+        };
+        for (File f : candidates) {
+            if (f.exists()) {
+                return f;
+            }
+        }
+        String javaHome = System.getenv("JAVA_HOME");
+        if (javaHome != null && !javaHome.isEmpty()) {
+            File f = new File(javaHome, "bin/jar.exe");
+            if (f.exists()) {
+                return f;
+            }
+        }
+        return null;
     }
 
     // ===== 工具 =====
