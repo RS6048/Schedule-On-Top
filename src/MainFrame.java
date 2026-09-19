@@ -394,8 +394,26 @@ public class MainFrame extends JFrame implements ActionListener {
         settingsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         settingsScroll.getVerticalScrollBar().setUnitIncrement(16);
         settingsScroll.getViewport().setOpaque(false);
+        // 组件宽度跟随视口动态收缩，避免硬编码最大宽度（170/180）超过 200px 左栏实际
+        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来“偏移出框架”
+        settingsScroll.getViewport().addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                int w = settingsScroll.getViewport().getWidth() - 12;
+                if (w < 40) {
+                    return;
+                }
+                for (java.awt.Component c : tabSettings.getComponents()) {
+                    if (c instanceof javax.swing.JComponent jc) {
+                        Dimension max = jc.getMaximumSize();
+                        Dimension pref = jc.getPreferredSize();
+                        int h = (max.height == Integer.MAX_VALUE) ? pref.height : max.height;
+                        jc.setMaximumSize(new Dimension(w, h));
+                    }
+                }
+            }
+        });
         modeTabs.addTab("设置", settingsScroll);
-
         modeTabs.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         controlPanel.add(modeTabs, BorderLayout.CENTER);
 
@@ -1306,7 +1324,7 @@ public class MainFrame extends JFrame implements ActionListener {
             }
             int pairs = text.trim().split("\\s+").length / 2;
             lines.set(0, text);
-            // 对齐各课程行（周一~周五）：token 数 = 时段数，多退少补（"\"=无课）
+            // 对齐各课程行（周一~周五）：token 数 = 时段数，多退少补（"\\ "=无课）
             for (int i = 1; i < lines.size(); i++) {
                 String row = lines.get(i);
                 if (row.trim().isEmpty()) continue;
@@ -1600,7 +1618,7 @@ public class MainFrame extends JFrame implements ActionListener {
 
     /**
      * 对齐课程行到指定 token 数（类比 Excel 增删列）：
-     * token 多余则截断，不足则补 "\"（无课）。
+     * token 多余则截断，不足则补 "\\"（无课）。
      *
      * @param line  课程行文本
      * @param count 目标 token 数（= 时间对数）
