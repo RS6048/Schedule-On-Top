@@ -1,1 +1,21 @@
-{"version":"1.0.1","note":"设置面板添加滚动条（自动更新区块不再超出窗口）","files":["src/Main.java","src/MainWindow.java","src/MainFrame.java","src/SScriptInterpreter.java","src/ScriptSplash.java","src/NoticeWindow.java","src/CircleAnimationWindow.java","src/CommentWindow.java","src/SimpleWindow.java","src/TimeChecker.java","src/IniFileReader.java","src/FrameTray.java","src/UpdateChecker.java","src/META-INF/MANIFEST.MF","BuildJar.bat"]}
+{
+  "version": "1.1.0",
+  "note": "时间宏实时化（%time%/%hour%/%minute%/%second% 取当前而非 reload 快照）；延迟课表后缀统一为 .txt；tick 每秒确保当天 delay 文件存在（无则建 AUTO）；设置面板组件宽度跟随视口修复水平溢出；自动更新改为自动检测+手动确认；更新编译后自动打包 sc.jar",
+  "files": [
+    "src/Main.java",
+    "src/MainWindow.java",
+    "src/MainFrame.java",
+    "src/SScriptInterpreter.java",
+    "src/ScriptSplash.java",
+    "src/NoticeWindow.java",
+    "src/CircleAnimationWindow.java",
+    "src/CommentWindow.java",
+    "src/SimpleWindow.java",
+    "src/TimeChecker.java",
+    "src/IniFileReader.java",
+    "src/FrameTray.java",
+    "src/UpdateChecker.java",
+    "src/META-INF/MANIFEST.MF",
+    "BuildJar.bat"
+  ]
+}

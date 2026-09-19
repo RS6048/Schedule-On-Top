@@ -20,7 +20,7 @@ bin/
 /nbproject/private/
 /nbbuild/
 /dist/
-/nbdist/
+nbdist/
 /.nb-gradle/
 
 ### VS Code ###
@@ -39,6 +39,7 @@ out/
 *.jar
 
 ### 个人课表数据（不入库）###
+# 根目录所有 .txt 均视为个人数据（课表/命令/配置），仅保留以下例外
 *.txt
 !src/**/*.java
 !src/**/*.md
@@ -49,3 +50,6 @@ out/
 delay/
 commands/
 *.png
+
+### 配置隔离目录（全部个人数据）###
+data/
