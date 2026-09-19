@@ -21,16 +21,16 @@ import java.util.List;
  *   <li>创建主窗口、系统托盘等 UI 组件。</li>
  * </ul>
  *
- * <p>配置文件约定（均位于程序运行目录）：</p>
+ * <p>配置文件约定（统一存放于 {@code data/} 目录，与代码隔离）：</p>
  * <ul>
- *   <li>{@code schedule.txt} — 周一至周五课表（时间行 + 周一~周五课程行）</li>
- *   <li>{@code saturday.txt} — 周六课表（时间行 + 周次轮转行）</li>
- *   <li>{@code self_study.txt} — 自习（时间行 + 周次轮转行）</li>
- *   <li>{@code night_study.txt} — 晚自习时间段（周一~周五且本地开启时生效）</li>
- *   <li>{@code delay/*.delay} — 延迟课表（统一格式：时间行 + "课表 : 值日生"；周日课表也由当天延迟课表承载）</li>
- *   <li>{@code monitor.txt} — 值日生表</li>
- *   <li>{@code full_name.txt} — 课程简称→全称映射（{@code $---$} 分割线上方为隐藏字符）</li>
- *   <li>{@code .local} — 本地配置</li>
+ *   <li>{@code data/schedule.txt} — 周一至周五课表（时间行 + 周一~周五课程行）</li>
+ *   <li>{@code data/saturday.txt} — 周六课表（时间行 + 周次轮转行）</li>
+ *   <li>{@code data/self_study.txt} — 自习（时间行 + 周次轮转行）</li>
+ *   <li>{@code data/night_study.txt} — 晚自习时间段（周一~周五且本地开启时生效）</li>
+ *   <li>{@code data/delay/*.txt} — 延迟课表（统一格式：时间行 + "课表 : 值日生"；周日课表也由当天延迟课表承载）</li>
+ *   <li>{@code data/monitor.txt} — 值日生表</li>
+ *   <li>{@code data/full_name.txt} — 课程简称→全称映射（{@code $---$} 分割线上方为隐藏字符）</li>
+ *   <li>{@code data/.local} — 本地配置</li>
  * </ul>
  */
 public class Main {
@@ -48,20 +48,20 @@ public class Main {
     /** 全局 Toolkit（获取屏幕尺寸等）。 */
     public static final Toolkit tk = Toolkit.getDefaultToolkit();
 
-    // ===== 配置文件 =====
-    public static final File schedule = new File("./schedule.txt");
-    public static final File saturday = new File("./saturday.txt");
-    public static final File sstudy = new File("./self_study.txt");
-    public static final File nstudy = new File("./night_study.txt");
-    public static final File monitor = new File("./monitor.txt");
-    public static final File fullName = new File("./full_name.txt");
-    public static final File local = new File("./.local");
+    // ===== 配置文件（统一存放于 data/，与代码隔离）=====
+    public static final File schedule = new File("./data/schedule.txt");
+    public static final File saturday = new File("./data/saturday.txt");
+    public static final File sstudy = new File("./data/self_study.txt");
+    public static final File nstudy = new File("./data/night_study.txt");
+    public static final File monitor = new File("./data/monitor.txt");
+    public static final File fullName = new File("./data/full_name.txt");
+    public static final File local = new File("./data/.local");
 
     /** 命令脚本目录（.txt，程序化修改课表与系统操作）。 */
-    public static final File commandsDir = new File("./commands");
+    public static final File commandsDir = new File("./data/commands");
 
-    /** .delay 延迟课表目录（指定日期覆盖课表）。 */
-    public static final File delayDir = new File("./delay");
+    /** 延迟课表目录（指定日期覆盖课表），后缀统一为 .txt。 */
+    public static final File delayDir = new File("./data/delay");
 
     // ===== 运行时数据 =====
     /** 本地配置键值（周次、主题色等）。 */
@@ -180,6 +180,10 @@ public class Main {
             }
             // 每次更新循环执行 tick.txt（后台线程，防重入）
             executeTickScript();
+            // tick 路径：确保今天 delay 文件存在（已有则直接加载不写盘，没有才创建 AUTO）
+            if (lastCtx != null && lastCtx.blocks != null && lastCtx.blocks.size() > 2) {
+                ensureTodayDelayExists(lastCtx.blocks.get(1), lastCtx.blocks.get(2), scheds);
+            }
         });
         t.start();
     }
@@ -451,7 +455,7 @@ public class Main {
             cont = new String[]{baseSchedule, duty};
 
             // 延迟课表覆盖（统一格式：时间行 + "课表 : 值日生"）。
-            // 在 scheds 合并之前应用：手动 .delay 文件可同时替换课表、值日生与时间段
+            // 在 scheds 合并之前应用：手动延迟课表文件可同时替换课表、值日生与时间段
             DelayData delay = null;
             try {
                 delay = loadDelaySchedule(today);
@@ -565,7 +569,7 @@ public class Main {
         if (dayOfWeek == 7) {
             // 周日：由当天的延迟课表提供（统一格式：时间行 + "课表 : 值日生"）。
             // 无独立 sunday.txt；delay 目录尚无今天的文件时使用兜底模板（reload 会自动创建）
-            errorFile = "delay/当天.delay";
+            errorFile = "data/delay/当天.txt";
             File delayFile = findDelayFile(date, true);
             if (delayFile != null) {
                 try (Scanner sc = new Scanner(delayFile, StandardCharsets.UTF_8)) {
@@ -660,14 +664,14 @@ public class Main {
      *
      * @param date        目标日期
      * @param includeAuto 是否允许回退到自动快照文件
-     * @return 匹配的 .delay 文件；无匹配返回 null
+     * @return 匹配的延迟课表文件；无匹配返回 null
      */
     private static File findDelayFile(LocalDate date, boolean includeAuto) {
         if (!delayDir.exists() || !delayDir.isDirectory()) {
             return null;
         }
         String dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE);
-        File[] files = delayDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".delay"));
+        File[] files = delayDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".txt"));
         if (files == null || files.length == 0) {
             return null;
         }
@@ -679,7 +683,7 @@ public class Main {
             if (!name.startsWith(dateStr)) {
                 continue;
             }
-            if (name.endsWith("_auto.delay") || isAutoDelayFile(f)) {
+            if (name.endsWith("_auto.txt") || isAutoDelayFile(f)) {
                 if (auto == null || f.lastModified() > auto.lastModified()) {
                     auto = f;
                 }
@@ -702,7 +706,7 @@ public class Main {
      *   <li>时间段（空格分隔的 HH:mm 成对）</li>
      *   <li>课表内容 : 值日生（冒号分隔，两侧各自 trim）</li>
      * </ol>
-     * <p>自动快照文件（{@code _auto.delay} / 含 {@code AUTO} 行）不参与覆盖。</p>
+     * <p>自动快照文件（{@code _auto.txt} / 含 {@code AUTO} 行）不参与覆盖。</p>
      *
      * @param date 目标日期
      * @return 延迟课表数据；无匹配时返回 null
@@ -730,7 +734,7 @@ public class Main {
     }
 
     /**
-     * 判断 .delay 文件是否为自动创建的快照（内含 {@code AUTO} 标记行）。
+     * 判断延迟课表文件是否为自动创建的快照（内含 {@code AUTO} 标记行）。
      */
     private static boolean isAutoDelayFile(File f) {
         try (BufferedReader br = new BufferedReader(
@@ -748,7 +752,7 @@ public class Main {
     }
 
     /**
-     * 确保今天的延迟课表存在：若 ./delay/ 下<b>没有手动创建</b>的今天延迟课表，
+     * 确保今天的延迟课表存在：若 ./data/delay/ 下<b>没有手动创建</b>的今天延迟课表，
      * 则自动创建（已存在自动快照时覆盖）今天的延迟课表。
      * 自动快照文件含 {@code AUTO} 标识行，不参与延迟课表覆盖逻辑。
      * 格式（类周日模板）：第 1 行时间段（含自习/晚自习），第 2 行 "课表 : 值日生"。
@@ -765,12 +769,12 @@ public class Main {
             delayDir.mkdirs();
         }
         String todayStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE);
-        File[] files = delayDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".delay"));
+        File[] files = delayDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".txt"));
         if (files != null) {
             for (File f : files) {
                 String name = f.getName();
                 // 手动文件：文件名以今天日期开头，且非自动快照（_auto 后缀或含 AUTO 行）
-                if (name.startsWith(todayStr) && !name.endsWith("_auto.delay")
+                if (name.startsWith(todayStr) && !name.endsWith("_auto.txt")
                         && !isAutoDelayFile(f)) {
                     // 存在手动创建的今天延迟课表 → 不自动创建/覆盖
                     return;
@@ -786,13 +790,57 @@ public class Main {
                 .append(schedule == null ? "" : schedule)
                 .append(" : ").append(duty == null ? "" : duty).append('\n')
                 .append("AUTO").append('\n');
-        File auto = new File(delayDir, todayStr + "_auto.delay");
+        File auto = new File(delayDir, todayStr + "_auto.txt");
         writeFile(auto, sb.toString());
         System.out.println("[delay] 已自动创建今天的延迟课表: " + auto.getName());
     }
 
     /**
-     * 执行 ./commands/load.txt（每次 {@link #reload()} 时加载）。
+     * tick 路径：确保今天 delay 目录下有文件即可。
+     *
+     * <p>规则（与 reload 路径区分）：</p>
+     * <ul>
+     *   <li>今天<b>已有</b>任何 delay 文件（手动或 AUTO）→ 直接加载，不写盘；</li>
+     *   <li>今天<b>没有</b>任何 delay 文件 → 用当前显示内容创建一份含 AUTO 标识的快照。</li>
+     * </ul>
+     * 与 {@link #ensureAutoDelaySchedule} 的区别：本函数<b>绝不覆盖</b>已有的今天文件，
+     * 避免 tick 每秒反复重写 AUTO；刷新/覆盖 AUTO 只发生在用户触发 reload() 时。
+     *
+     * @param schedule 当前课表字符串（取自 lastCtx.blocks[1]）
+     * @param duty     当前值日生（取自 lastCtx.blocks[2]，可为 null）
+     * @param timesArr 当前课表时间段数组（含自习/晚自习，可为 null）
+     */
+    private static void ensureTodayDelayExists(String schedule, String duty, String[] timesArr) {
+        if (!delayDir.exists()) {
+            delayDir.mkdirs();
+            return;
+        }
+        String todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE);
+        File[] files = delayDir.listFiles((dir, name) ->
+                name.toLowerCase().endsWith(".txt") && name.startsWith(todayStr));
+        if (files != null && files.length > 0) {
+            return; // 今天已有 delay 文件 → 直接加载，不动
+        }
+        // 没有 → 创建 AUTO 快照
+        try {
+            StringBuilder sb = new StringBuilder();
+            if (timesArr != null && timesArr.length > 0) {
+                sb.append(String.join(" ", timesArr));
+            }
+            sb.append('\n')
+                    .append(schedule == null ? "" : schedule)
+                    .append(" : ").append(duty == null ? "" : duty).append('\n')
+                    .append("AUTO").append('\n');
+            File auto = new File(delayDir, todayStr + "_auto.txt");
+            writeFile(auto, sb.toString());
+            System.out.println("[delay] tick 检测到今天无延迟课表，已自动创建: " + auto.getName());
+        } catch (IOException e) {
+            System.err.println("[delay] tick 自动创建延迟课表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 执行 ./data/commands/load.txt（每次 {@link #reload()} 时加载）。
      *
      * <p>其余命令文件<b>不会自动执行</b>，需在脚本中用 {@code run <文件名>}
      * 命令显式调用；tick.txt 由 {@link #executeTickScript()} 在每次更新循环中执行。</p>
@@ -840,7 +888,7 @@ public class Main {
     }
 
     /**
-     * 执行 ./commands/tick.txt（每次更新循环加载）。
+     * 执行 ./data/commands/tick.txt（每次更新循环加载）。
      *
      * <p>基于 reload 的基础上下文拷贝独立执行（每次从基准状态开始，
      * addblock 等结果仅作用于当次显示、不会跨 tick 累积），
