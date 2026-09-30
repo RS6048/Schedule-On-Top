@@ -501,7 +501,12 @@ public class SScriptInterpreter {
     }
 
     /**
-     * setcourse index name —— 设置第 index 节课的科目。
+     * setcourse index name —— 设置第 index 个课表 token 的科目。
+     *
+     * <p>index 从 0 开始，<b>课间（{@code |}）、空位（{@code \\}）、晚自习（{@code ~}）等
+     * 全部 token 均计入位置</b>（与课表行 token 一一对应）。name 若为 full_name.txt 中的
+     * 全称（如 {@code 语文}），自动反向解析为简称（{@code 语}）存储，使倒计时显示正确的
+     * 完整名称，同时保持单个 token 参与课程定位。</p>
      */
     private void handleSetCourse(String[] parts) {
         if (parts.length < 3) return;
@@ -514,6 +519,7 @@ public class SScriptInterpreter {
             }
             name = sb.toString();
         }
+        name = Main.fullNameToToken(name);
         if (index >= 0 && index < ctx.courses.size()) {
             ctx.courses.set(index, name);
             ctx.flushSchedule();
@@ -1088,7 +1094,7 @@ public class SScriptInterpreter {
      *
      * <p>按 {@link Context#times}（HH:mm 成对）匹配当前时间所在时段，返回
      * {@link Context#courses} 对应位置的 token<b>本身</b>（包括 {@code |} 恰饭、
-     * {@code \} 无课、{@code ~} 晚自习等）；仅当该 token 为隐藏字符
+     * {@code \\} 无课、{@code ~} 晚自习等）；仅当该 token 为隐藏字符
      * （full_name.txt 中 {@code $---$} 分割线上方）时返回 null；时段外返回空串。</p>
      *
      * @return 当前时段 token；时段外返回 ""；隐藏字符返回 null
@@ -1127,7 +1133,7 @@ public class SScriptInterpreter {
      *
      * <p>以当前偏移时间为基准：处于课间时返回下一时段的 token；正在上课时返回
      * 下课后（下一时段）的 token。与 {@link #currentCourse()} 一致，返回 token
-     * <b>本身</b>（含 {@code |}、{@code \}、{@code ~} 等）；仅隐藏字符返回 null；
+     * <b>本身</b>（含 {@code |}、{@code \\}、{@code ~} 等）；仅隐藏字符返回 null；
      * 无后续时段返回空串。</p>
      *
      * @return 下一时段 token；无后续时段返回 ""；隐藏字符返回 null
