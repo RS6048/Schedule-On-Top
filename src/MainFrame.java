@@ -33,14 +33,14 @@ import java.util.regex.Pattern;
  * <p>窗口分两个模式（左侧选项卡切换）：</p>
  * <ul>
  *   <li><b>【课表】</b>：真实更改周次（写入 .local）、选中两个课程单元格 → 应用换课
- *       （写入 commands/swap.txt，命令系统生效）；</li>
+ *       （追加写入 data/swap.txt 换课数据文件）；</li>
  *   <li><b>【设置】编辑模式</b>：每个课程块为<b>下拉选择框</b>，直接选择即永久写入
  *       课表文件；另有主题色调节、Local 设置（晚自习、愚人节）、课程管理、更改时段、
  *       周六时段与轮次、晚自习轮次、命令测试。</li>
  * </ul>
  *
  * <p>网格 8 列：时间 / 周一~周五 / <b>周六时间（独立一列）</b> / 周六课程。
- * 临时换课与命令系统共用 commands/swap.txt 作为唯一事实源。</p>
+ * 临时换课通过 data/swap.txt 数据文件生效（两行一组，yyyy@mm@dd@名）。</p>
  */
 public class MainFrame extends JFrame implements ActionListener {
 
@@ -236,7 +236,7 @@ public class MainFrame extends JFrame implements ActionListener {
         weekBtnPanel.add(prevWeekBtn);
         weekBtnPanel.add(nextWeekBtn);
 
-        // 临时换课按钮：选中两个课程单元格后互换（写入 commands/swap.txt，命令系统生效）
+        // 临时换课按钮：选中两个课程单元格后互换（追加写入 data/swap.txt，两行一组）
         applyBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
         applyBtn.setMaximumSize(new Dimension(170, 28));
         applyBtn.setFont(new Font("微软雅黑", Font.BOLD, 11));
@@ -395,24 +395,17 @@ public class MainFrame extends JFrame implements ActionListener {
         settingsScroll.getVerticalScrollBar().setUnitIncrement(16);
         settingsScroll.getViewport().setOpaque(false);
         // 组件宽度跟随视口动态收缩，避免硬编码最大宽度（170/180）超过 200px 左栏实际
-        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来“偏移出框架”
+        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来“偏移出框架”。
+        // 只改 maximumSize 无效（BoxLayout 按 preferred 布局），因此 preferred/minimum/
+        // maximum 三约束同步钳制为视口可用宽度。
         settingsScroll.getViewport().addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
             public void componentResized(java.awt.event.ComponentEvent e) {
-                int w = settingsScroll.getViewport().getWidth() - 12;
-                if (w < 40) {
-                    return;
-                }
-                for (java.awt.Component c : tabSettings.getComponents()) {
-                    if (c instanceof javax.swing.JComponent jc) {
-                        Dimension max = jc.getMaximumSize();
-                        Dimension pref = jc.getPreferredSize();
-                        int h = (max.height == Integer.MAX_VALUE) ? pref.height : max.height;
-                        jc.setMaximumSize(new Dimension(w, h));
-                    }
-                }
+                fitSettingsWidth(tabSettings, settingsScroll);
             }
         });
+        // 首次布局后立即校准一次（视口初次加入监听器可能不触发 resize 事件）
+        SwingUtilities.invokeLater(() -> fitSettingsWidth(tabSettings, settingsScroll));
         modeTabs.addTab("设置", settingsScroll);
         modeTabs.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         controlPanel.add(modeTabs, BorderLayout.CENTER);
@@ -436,6 +429,39 @@ public class MainFrame extends JFrame implements ActionListener {
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
         add(scrollPane, BorderLayout.CENTER);
+    }
+
+    /**
+     * 将设置面板全部子组件的宽度钳制为视口可用宽度。
+     *
+     * <p>preferred/maximum/minimum 三个尺寸约束同步设为同一宽度，BoxLayout 才真正
+     * 按该宽度布局（仅设 maximum 时仍按 preferred 宽度溢出）；高度保持组件自身
+     * preferred/maximum。宽度再减 16 对应面板 EmptyBorder 8+8。</p>
+     *
+     * @param tab    设置面板
+     * @param scroll 承载设置面板的滚动面板
+     */
+    private static void fitSettingsWidth(JPanel tab, JScrollPane scroll) {
+        int w = scroll.getViewport().getWidth() - 16;
+        if (w < 40) {
+            return;
+        }
+        for (java.awt.Component c : tab.getComponents()) {
+            if (c instanceof javax.swing.JComponent jc) {
+                Dimension max = jc.getMaximumSize();
+                Dimension pref = jc.getPreferredSize();
+                int h = (max.height == Integer.MAX_VALUE) ? pref.height : max.height;
+                if (h <= 0) {
+                    h = pref.height;
+                }
+                Dimension d = new Dimension(w, h);
+                jc.setPreferredSize(d);
+                jc.setMaximumSize(d);
+                jc.setMinimumSize(d);
+            }
+        }
+        tab.revalidate();
+        tab.repaint();
     }
 
     /**
@@ -690,10 +716,10 @@ public class MainFrame extends JFrame implements ActionListener {
     /**
      * 构建指定日期的课程单元格列表（完整显示全部课程，不含自习/晚自习追加内容）。
      *
-     * <p>【课表】模式返回 UnitPane（点击选中），并在单双周解析后以 dryRun 方式
-     * 执行 load.txt（含 run swap.txt 的 if+setcourse 换课），显示与主课条一致的效果；
+     * <p>【课表】模式返回 UnitPane（点击选中），并在单双周解析后先应用换课数据文件
+     * （data/swap.txt）、再以 dryRun 方式执行 load.txt，显示与主课条一致的效果；
      * 【设置】编辑模式返回 ComboCell（下拉选择框，选择即永久更改课表文件），
-     * 显示文件原始内容，不应用脚本。</p>
+     * 显示文件原始内容，不应用换课与脚本。</p>
      *
      * @param date         目标日期
      * @param weekTurn     当前周次（单双周解析与周六行轮转用）
@@ -720,9 +746,14 @@ public class MainFrame extends JFrame implements ActionListener {
             base = sb.toString().trim();
         }
 
-        // 课表模式：dryRun 执行 load.txt（if+setcourse 换课生效，系统命令跳过），
-        // 使窗口显示与主课条（真实执行脚本）一致
+        // 课表模式：先应用换课数据文件（data/swap.txt），再 dryRun 执行 load.txt
+        // （系统命令跳过），使窗口显示与主课条（真实执行）一致
         if (applyPreview) {
+            try {
+                base = Main.applySwapFile(base, date);
+            } catch (java.io.IOException e) {
+                System.err.println("[swap] 预览应用换课失败: " + e.getMessage());
+            }
             File load = new File(Main.commandsDir, "load.txt");
             if (load.exists()) {
                 List<String> scriptLines = readAllLines(load);
@@ -1324,7 +1355,7 @@ public class MainFrame extends JFrame implements ActionListener {
             }
             int pairs = text.trim().split("\\s+").length / 2;
             lines.set(0, text);
-            // 对齐各课程行（周一~周五）：token 数 = 时段数，多退少补（"\\ "=无课）
+            // 对齐各课程行（周一~周五）：token 数 = 时段数，多退少补（"\ "=无课）
             for (int i = 1; i < lines.size(); i++) {
                 String row = lines.get(i);
                 if (row.trim().isEmpty()) continue;
@@ -1669,10 +1700,10 @@ public class MainFrame extends JFrame implements ActionListener {
     /**
      * 执行临时换课：将两个选中单元格的课程互换。
      *
-     * <p>换课以命令脚本形式追加到 {@code commands/swap.txt}（由 load.txt 每次 reload
-     * 自动调用）：生成 {@code if %date% == MM.dd + setcourse} 块，目标日期当天生效。
-     * 追加而非覆盖——脚本顺序执行，同一位置重复换课时后面的记录覆盖前面的，
-     * 因此再次点击同一对可换回。</p>
+     * <p>换课以<b>数据文件</b>形式追加到 {@code data/swap.txt}（两行一组，每行
+     * {@code yyyy@mm@dd@名}，名 = 课程全称）：记录两门课<b>当前</b>所在日期与名称，
+     * 应用时按名称定位课表 token（含课间等全部 token）互换。追加而非覆盖——
+     * 再次点击同一对（此时显示已互换后的名称）写入新记录即可换回。</p>
      */
     private void applySwap() {
         if (swap[1] == null) {
@@ -1692,7 +1723,7 @@ public class MainFrame extends JFrame implements ActionListener {
             return;
         }
 
-        // 解析 position → 日期 + 索引
+        // 解析 position → 年份 + 日期 + 索引
         int[] pa = parsePosition(a.position);
         int[] pb = parsePosition(b.position);
         if (pa == null || pb == null) {
@@ -1700,41 +1731,20 @@ public class MainFrame extends JFrame implements ActionListener {
             return;
         }
 
+        // 换课数据文件：两行一组，yyyy@mm@dd@名（名 = 全称，无映射时用显示名）
+        String dateA = String.format("%04d@%02d@%02d", pa[0], pa[1], pa[2]);
+        String dateB = String.format("%04d@%02d@%02d", pb[0], pb[1], pb[2]);
+        String nameA = Main.tokenToFullName(a.course);
+        String nameB = Main.tokenToFullName(b.course);
         StringBuilder sb = new StringBuilder();
-        String dateA = String.format("%02d.%02d", pa[0], pa[1]);
-        String dateB = String.format("%02d.%02d", pb[0], pb[1]);
-        if (dateA.equals(dateB)) {
-            // 同一天：一个 if 块内两条 setcourse（顺序执行 = 互换）
-            sb.append("# 窗口换课 ").append(dateA).append(" 第").append(pa[2])
-                    .append("节 ⇄ 第").append(pb[2]).append("节\n");
-            sb.append("if %date% == ").append(dateA).append('\n');
-            sb.append("  setcourse ").append(pa[2]).append(' ').append(b.course).append('\n');
-            sb.append("  setcourse ").append(pb[2]).append(' ').append(a.course).append('\n');
-            sb.append("endif\n");
-        } else {
-            sb.append("# 窗口换课 ").append(dateA).append(" 第").append(pa[2]).append("节 ⇄ ")
-                    .append(dateB).append(" 第").append(pb[2]).append("节\n");
-            sb.append("if %date% == ").append(dateA).append('\n');
-            sb.append("  setcourse ").append(pa[2]).append(' ').append(b.course).append('\n');
-            sb.append("endif\n");
-            sb.append("if %date% == ").append(dateB).append('\n');
-            sb.append("  setcourse ").append(pb[2]).append(' ').append(a.course).append('\n');
-            sb.append("endif\n");
-        }
+        sb.append("# 窗口换课 ").append(dateA).append(" ⇄ ").append(dateB).append('\n');
+        sb.append(dateA).append('@').append(nameA).append('\n');
+        sb.append(dateB).append('@').append(nameB).append('\n');
 
-        if (!Main.commandsDir.exists()) {
-            Main.commandsDir.mkdirs();
+        if (!Main.swapFile.getParentFile().exists()) {
+            Main.swapFile.getParentFile().mkdirs();
         }
-        File swapFile = new File(Main.commandsDir, "swap.txt");
-        if (!swapFile.exists()) {
-            try {
-                swapFile.createNewFile();
-            } catch (IOException e) {
-                Main.outputException(e);
-                return;
-            }
-        }
-        try (FileWriter fw = new FileWriter(swapFile, StandardCharsets.UTF_8, true)) {
+        try (FileWriter fw = new FileWriter(Main.swapFile, StandardCharsets.UTF_8, true)) {
             fw.write(sb.toString());
         } catch (IOException e) {
             Main.outputException(e);
@@ -1755,13 +1765,14 @@ public class MainFrame extends JFrame implements ActionListener {
     }
 
     /**
-     * 解析 position（year@month@day@index）→ [month, day, index]；无效返回 null。
+     * 解析 position（year@month@day@index）→ [year, month, day, index]；无效返回 null。
      */
     private static int[] parsePosition(String position) {
         try {
             String[] p = position.split("@");
             if (p.length != 4) return null;
-            return new int[]{Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3])};
+            return new int[]{Integer.parseInt(p[0]), Integer.parseInt(p[1]),
+                    Integer.parseInt(p[2]), Integer.parseInt(p[3])};
         } catch (NumberFormatException e) {
             return null;
         }
