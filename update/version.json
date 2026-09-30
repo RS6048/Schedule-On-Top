@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "note": "时间宏实时化（%time%/%hour%/%minute%/%second% 取当前而非 reload 快照）；延迟课表后缀统一为 .txt；tick 每秒确保当天 delay 文件存在（无则建 AUTO）；设置面板组件宽度跟随视口修复水平溢出；自动更新改为自动检测+手动确认；更新编译后自动打包 sc.jar",
+  "version": "1.2.0",
+  "note": "换课回归数据文件 data/swap.txt（两行一组 yyyy@mm@dd@名，按名称定位含课间在内的全部 token 互换，移除 commands/swap.txt 命令脚本）；setcourse 索引计入课间等全部 token、名称支持全称自动解析为简称；自动更新打包后自动删除 src/ 与 out/（run.bat 优先 sc.jar）；设置面板水平溢出彻底修复（宽度三约束同步钳制）",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
