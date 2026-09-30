@@ -47,7 +47,7 @@ public class UpdateChecker {
     private static final File VERSION_FILE = new File("./data/version.txt");
 
     /** 当前程序版本（与推送的 version.json 一致）。 */
-    public static final String LOCAL_VERSION = "1.1.0";
+    public static final String LOCAL_VERSION = "1.2.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
@@ -259,7 +259,7 @@ public class UpdateChecker {
         String home = System.getProperty("java.home", "");
         File[] candidates = {
                 new File(home, "bin/javac.exe"),
-                new File(home, "../bin/javac.exe"),
+                new File(home, "../bin/javac.exe"), // JRE 场景：java.home 指向 jre 时回退到 jdk/bin
         };
         for (File f : candidates) {
             if (f.exists()) {
@@ -324,6 +324,10 @@ public class UpdateChecker {
             String jarMsg = "";
             if (compile.startsWith("编译成功")) {
                 jarMsg = packageJar();
+                // 打包成功后自动清理源码与编译产物（运行中的类仍在内存，重启由 sc.jar 启动）
+                if (jarMsg.startsWith("已打包")) {
+                    cleanupSources();
+                }
             }
             Files.write(VERSION_FILE.toPath(), info.version.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
@@ -409,6 +413,40 @@ public class UpdateChecker {
             }
         }
         return null;
+    }
+
+    /**
+     * 打包成功后自动删除 {@code src/} 与 {@code out/}（源码与编译产物与配置隔离，
+     * 重启由 sc.jar 启动；下次更新会重新下载源码并重建编译目录）。
+     *
+     * @return 清理结果描述
+     */
+    private static String cleanupSources() {
+        StringBuilder sb = new StringBuilder();
+        for (String path : new String[]{"src", "out"}) {
+            File f = new File(path);
+            if (f.exists()) {
+                sb.append(deleteRecursively(f) ? ("已删除 " + path + "/") : ("删除 " + path + "/ 失败"));
+                sb.append(' ');
+            }
+        }
+        String result = sb.toString().trim();
+        return result.isEmpty() ? "无源码/编译产物可清理" : result;
+    }
+
+    /** 递归删除文件或目录。 */
+    private static boolean deleteRecursively(File f) {
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File c : children) {
+                    if (!deleteRecursively(c)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return f.delete();
     }
 
     // ===== 工具 =====
