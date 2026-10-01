@@ -103,6 +103,9 @@ public class Main {
     /** 时间偏移（秒）："我的时间慢了x秒"，课表时间判断与 $time$ 宏同步偏移。 */
     static volatile int timeOffsetSeconds = 0;
 
+    /** 更新镜像域名（.local 第 6 行保存；空 = 默认 GitHub raw 直连）。 */
+    public static volatile String mirrorDomain = "";
+
     /** tick 脚本是否正在执行（防重入）。 */
     private static volatile boolean tickRunning = false;
 
@@ -403,7 +406,7 @@ public class Main {
      *
      * <p>文件格式：每行 {@code yyyy@mm@dd@名}，<b>两行一组</b>构成一次换课；
      * 名 = 课程全称（如 {@code 语文}）或简称（如 {@code 语}）。应用时按名称定位
-     * 课表 token（第一节课与课间 {@code |}、空位 {@code \\} 等全部 token 均计入位置），
+     * 课表 token（第一节课与课间 {@code |}、空位 {@code \} 等全部 token 均计入位置），
      * 将两门课互换；仅处理目标日期匹配的记录。</p>
      *
      * @param sched 课表文本（空格分隔）
@@ -1133,6 +1136,12 @@ public class Main {
             locals.put("HasNightStudy", sc.nextInt());
             locals.put("AprilFool", sc.nextInt());
             locals.put("Theme", sc.nextInt());
+            // 第 6 行（可选）：更新镜像域名（空 = 默认直连）
+            if (sc.hasNextLine()) sc.nextLine(); // 消费第 5 行尾部
+            if (sc.hasNextLine()) {
+                String m = sc.nextLine().trim();
+                if (!m.isEmpty()) mirrorDomain = m;
+            }
         }
     }
 
@@ -1148,6 +1157,7 @@ public class Main {
             fw.write(getLocal("HasNightStudy", 0) + "\n");
             fw.write(getLocal("AprilFool", 0) + "\n");
             fw.write(getLocal("Theme", 0) + "\n");
+            fw.write(mirrorDomain == null ? "" : mirrorDomain + "\n");
         }
     }
 
