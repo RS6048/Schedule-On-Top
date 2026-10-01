@@ -503,7 +503,7 @@ public class SScriptInterpreter {
     /**
      * setcourse index name —— 设置第 index 个课表 token 的科目。
      *
-     * <p>index 从 0 开始，<b>课间（{@code |}）、空位（{@code \\}）、晚自习（{@code ~}）等
+     * <p>index 从 0 开始，<b>课间（{@code |}）、空位（{@code \}）、晚自习（{@code ~}）等
      * 全部 token 均计入位置</b>（与课表行 token 一一对应）。name 若为 full_name.txt 中的
      * 全称（如 {@code 语文}），自动反向解析为简称（{@code 语}）存储，使倒计时显示正确的
      * 完整名称，同时保持单个 token 参与课程定位。</p>
@@ -1072,12 +1072,12 @@ public class SScriptInterpreter {
             return String.valueOf(ctx.weekTurn);
         }
         if ("course".equals(name)) {
-            // 当前时段对应的课表 token 本身（含 | \ ~ 等）；仅隐藏字符（full_name.txt
-            // 中 $---$ 分割线上方）返回 null，时段外返回空串
+            // 当前时段的课程完整名称（full_name.txt 映射，如 语→语文、|→恰饭）；
+            // 仅隐藏字符（full_name.txt 中 $---$ 分割线上方）返回 null，时段外返回空串
             return currentCourse();
         }
         if ("nextcourse".equals(name)) {
-            // 下一时段的课表 token 本身（课间→下一节，上课中→下课后下一节）；
+            // 下一时段课程的完整名称（课间→下一节，上课中→下课后下一节）；
             // 仅隐藏字符返回 null，无后续时段返回空串
             return nextCourse();
         }
@@ -1090,14 +1090,16 @@ public class SScriptInterpreter {
     }
 
     /**
-     * 计算当前时间对应的课表 token。
+     * 计算当前时间对应的课程完整名称。
      *
      * <p>按 {@link Context#times}（HH:mm 成对）匹配当前时间所在时段，返回
-     * {@link Context#courses} 对应位置的 token<b>本身</b>（包括 {@code |} 恰饭、
-     * {@code \\} 无课、{@code ~} 晚自习等）；仅当该 token 为隐藏字符
-     * （full_name.txt 中 {@code $---$} 分割线上方）时返回 null；时段外返回空串。</p>
+     * {@link Context#courses} 对应位置课程 token 的<b>完整名称</b>
+     * （full_name.txt 映射，如 {@code 语} → {@code 语文}；{@code |} → 恰饭、
+     * {@code \} → 无映射时保持 {@code \}、{@code ~} → 晚自习等）；仅当该 token
+     * 为隐藏字符（full_name.txt 中 {@code $---$} 分割线上方）时返回 null；
+     * 时段外返回空串。</p>
      *
-     * @return 当前时段 token；时段外返回 ""；隐藏字符返回 null
+     * @return 当前时段课程全称；时段外返回 ""；隐藏字符返回 null
      */
     private String currentCourse() {
         if (ctx.courses == null || ctx.courses.isEmpty()
@@ -1120,7 +1122,8 @@ public class SScriptInterpreter {
                     if (isHiddenCourse(c)) {
                         return null;
                     }
-                    return c;
+                    // 返回完整名称（full_name.txt 映射；无映射时保持 token 本身）
+                    return Main.tokenToFullName(c);
                 }
                 return "";
             }
@@ -1129,14 +1132,14 @@ public class SScriptInterpreter {
     }
 
     /**
-     * 计算下一时段的课表 token。
+     * 计算下一时段的课程完整名称。
      *
-     * <p>以当前偏移时间为基准：处于课间时返回下一时段的 token；正在上课时返回
-     * 下课后（下一时段）的 token。与 {@link #currentCourse()} 一致，返回 token
-     * <b>本身</b>（含 {@code |}、{@code \\}、{@code ~} 等）；仅隐藏字符返回 null；
-     * 无后续时段返回空串。</p>
+     * <p>以当前偏移时间为基准：处于课间时返回下一时段的课程；正在上课时返回
+     * 下课后（下一时段）的课程。与 {@link #currentCourse()} 一致，返回<b>完整名称</b>
+     * （full_name.txt 映射，{@code |}、{@code ~} 等同样映射为全称）；仅隐藏字符
+     * 返回 null；无后续时段返回空串。</p>
      *
-     * @return 下一时段 token；无后续时段返回 ""；隐藏字符返回 null
+     * @return 下一时段课程全称；无后续时段返回 ""；隐藏字符返回 null
      */
     private String nextCourse() {
         if (ctx.courses == null || ctx.courses.isEmpty()
@@ -1164,7 +1167,8 @@ public class SScriptInterpreter {
         if (isHiddenCourse(c)) {
             return null;
         }
-        return c;
+        // 返回完整名称（full_name.txt 映射；无映射时保持 token 本身）
+        return Main.tokenToFullName(c);
     }
 
     /** 判断课程简称是否为隐藏字符（full_name.txt 中 {@code $---$} 分割线上方的键）。 */
