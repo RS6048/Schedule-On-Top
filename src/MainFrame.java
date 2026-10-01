@@ -125,8 +125,8 @@ public class MainFrame extends JFrame implements ActionListener {
     private final JCheckBox nightStudyCheck = new JCheckBox("晚自习");
     private final JCheckBox aprilFoolCheck = new JCheckBox("愚人节彩蛋");
     private final JLabel dateRangeLabel = new JLabel("", SwingConstants.CENTER);
-    /** 换课模式预览周次（只预览不写入 .local）。 */
-    private int previewWeekTurn = 1;
+    /** 换课模式预览周次（只预览不写入 .local；0 = 未初始化，reload 时取当前真实周次）。 */
+    private int previewWeekTurn = 0;
     /** 设置模式周次微调器（真实更改 WeekTurn）。 */
     private JSpinner weekSpinner;
     /** 换课模式时间偏移微调器（秒，"我的时间慢了x秒"）。 */
@@ -151,12 +151,10 @@ public class MainFrame extends JFrame implements ActionListener {
     private final JButton testCmdBtn = new JButton("命令测试");
 
     // ---- 自动更新 ----
-    /** 镜像/更新源 raw 根输入框（mirror.txt，空 = 默认 GitHub 直连）。 */
+    /** 镜像域名输入框（只写域名，空 = 默认 GitHub 直连；改变即保存到 .local）。 */
     private JTextField mirrorField;
     /** 更新状态标签（当前版本 / 检查结果）。 */
     private JLabel updateStatusLabel;
-    /** 保存镜像配置。 */
-    private final JButton saveMirrorBtn = new JButton("保存镜像");
     /** 立即检查更新。 */
     private final JButton checkUpdateBtn = new JButton("检查更新");
 
@@ -187,7 +185,7 @@ public class MainFrame extends JFrame implements ActionListener {
         }
         mf = this;
 
-        setSize(720, 480);
+        setSize(720, 520);
         setMinimumSize(new Dimension(640, 400));
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -328,16 +326,16 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.add(hueTitle);
         tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(hueSelector);
-        tabSettings.add(Box.createVerticalStrut(10));
+        tabSettings.add(Box.createVerticalStrut(6));
         tabSettings.add(localTitle);
         tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(weekSpinnerTitle);
         tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(weekSpinner);
-        tabSettings.add(Box.createVerticalStrut(8));
+        tabSettings.add(Box.createVerticalStrut(6));
         tabSettings.add(nightStudyCheck);
         tabSettings.add(aprilFoolCheck);
-        tabSettings.add(Box.createVerticalStrut(10));
+        tabSettings.add(Box.createVerticalStrut(6));
         tabSettings.add(courseManageBtn);
         tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(timeEditBtn);
@@ -347,27 +345,26 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.add(nightEditBtn);
         tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(testCmdBtn);
-        tabSettings.add(Box.createVerticalStrut(12));
+        tabSettings.add(Box.createVerticalStrut(8));
 
         // ---- 自动更新 ----
         JLabel updateTitle = new JLabel("自动更新", SwingConstants.CENTER);
         updateTitle.setFont(new Font("微软雅黑", Font.BOLD, 13));
         updateTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
-        mirrorField = new JTextField(UpdateChecker.mirrorBase());
-        mirrorField.setMaximumSize(new Dimension(180, 24));
+        // 镜像只写域名；仓库信息（RS6048/Schedule-On-Top/main）在下载时自动追加；
+        // 值一旦改变立即保存到 .local（无需保存按钮），留空 = 默认 GitHub 直连
+        mirrorField = new JTextField(UpdateChecker.mirrorDomain());
+        mirrorField.setMaximumSize(new Dimension(170, 24));
         mirrorField.setAlignmentX(Component.CENTER_ALIGNMENT);
-        mirrorField.setToolTipText("更新源 raw 根地址；留空或恢复默认值使用 GitHub 直连，"
-                + "可填 gitee raw 根或 ghproxy 前缀拼接的地址");
+        mirrorField.setToolTipText("镜像域名（如 ghproxy.net），仓库信息下载时自动追加；留空 = 默认 GitHub 直连");
+        mirrorField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { saveMirrorFromField(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { saveMirrorFromField(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { saveMirrorFromField(); }
+        });
         updateStatusLabel = new JLabel("本地版本 v" + UpdateChecker.localVersion(), SwingConstants.CENTER);
         updateStatusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 10));
         updateStatusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        JLabel mirrorHint = new JLabel("更新源（镜像）", SwingConstants.CENTER);
-        mirrorHint.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        mirrorHint.setAlignmentX(Component.CENTER_ALIGNMENT);
-        saveMirrorBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
-        saveMirrorBtn.setMaximumSize(new Dimension(120, 26));
-        saveMirrorBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        saveMirrorBtn.addActionListener(this);
         checkUpdateBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
         checkUpdateBtn.setMaximumSize(new Dimension(120, 26));
         checkUpdateBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
@@ -375,14 +372,10 @@ public class MainFrame extends JFrame implements ActionListener {
 
         tabSettings.add(updateTitle);
         tabSettings.add(Box.createVerticalStrut(4));
-        tabSettings.add(mirrorHint);
-        tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(mirrorField);
-        tabSettings.add(Box.createVerticalStrut(4));
-        tabSettings.add(saveMirrorBtn);
-        tabSettings.add(Box.createVerticalStrut(4));
+        tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(checkUpdateBtn);
-        tabSettings.add(Box.createVerticalStrut(4));
+        tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(updateStatusLabel);
         tabSettings.add(Box.createVerticalGlue());
 
@@ -395,7 +388,7 @@ public class MainFrame extends JFrame implements ActionListener {
         settingsScroll.getVerticalScrollBar().setUnitIncrement(16);
         settingsScroll.getViewport().setOpaque(false);
         // 组件宽度跟随视口动态收缩，避免硬编码最大宽度（170/180）超过 200px 左栏实际
-        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来“偏移出框架”。
+        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来"偏移出框架"。
         // 只改 maximumSize 无效（BoxLayout 按 preferred 布局），因此 preferred/minimum/
         // maximum 三约束同步钳制为视口可用宽度。
         settingsScroll.getViewport().addComponentListener(new java.awt.event.ComponentAdapter() {
@@ -575,6 +568,55 @@ public class MainFrame extends JFrame implements ActionListener {
     }
 
     /**
+     * 读取晚自习时间段（night_study.txt 第 0 行成对配对）。
+     *
+     * <p>仅当本地开启晚自习时返回（与主课条 {@code Main.getSchedule} 的生效条件一致），
+     * 用于课表模式在周中时间列追加晚自习时间段。</p>
+     *
+     * @return 晚自习时间段列表（每项 [开始, 结束]）
+     */
+    private static List<String[]> readNightPairs() {
+        List<String[]> pairs = new ArrayList<>();
+        if (Main.getLocal("HasNightStudy", 0) != 1) {
+            return pairs;
+        }
+        try (Scanner sc = new Scanner(Main.nstudy, StandardCharsets.UTF_8)) {
+            if (sc.hasNextLine()) {
+                String[] t = sc.nextLine().split(" ");
+                for (int i = 0; i + 1 < t.length; i += 2) {
+                    String s = stripLeadingZero(t[i]);
+                    String e = stripLeadingZero(t[i + 1]);
+                    if (!Objects.equals(s, e)) {
+                        pairs.add(new String[]{s, e});
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+            // 文件不存在/读取失败 → 无晚自习
+        }
+        return pairs;
+    }
+
+    /**
+     * 读取晚自习时间点（night_study.txt 第 0 行，原样 split）。
+     *
+     * @return 晚自习时间点数组；未开启或读取失败返回空数组
+     */
+    private static String[] readNightTokens() {
+        if (Main.getLocal("HasNightStudy", 0) != 1) {
+            return new String[0];
+        }
+        try (Scanner sc = new Scanner(Main.nstudy, StandardCharsets.UTF_8)) {
+            if (sc.hasNextLine()) {
+                return sc.nextLine().split(" ");
+            }
+        } catch (IOException ignored) {
+            // 文件不存在/读取失败 → 无晚自习
+        }
+        return new String[0];
+    }
+
+    /**
      * 重新加载课表数据并重建网格。
      *
      * <p><b>【课表】模式</b>（8 列）：表头 [时间、周一~周五、周六时间、周六]。
@@ -602,7 +644,10 @@ public class MainFrame extends JFrame implements ActionListener {
         if (weekSpinner != null && !weekSpinner.getValue().equals(realWeek)) {
             weekSpinner.setValue(realWeek);
         }
-        LocalDate monday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        // 周次对应日期：以当前自然周周一为基准，按查看周次偏移
+        // （换课模式预览周次 / 设置模式真实周次，偏移 0）
+        LocalDate monday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                .plusWeeks((long) weekTurn - realWeek);
         LocalDate saturday = monday.plusDays(5);
         dateRangeLabel.setText(monday.format(DateTimeFormatter.ofPattern("MM.dd"))
                 + " ~ " + saturday.format(DateTimeFormatter.ofPattern("MM.dd")));
@@ -610,7 +655,11 @@ public class MainFrame extends JFrame implements ActionListener {
         // ===== 时间段：周中与周六各自独立读取 =====
         List<String[]> weekTimePairs = readTimePairs(Main.schedule);
         List<String[]> satTimePairs = readTimePairs(Main.saturday);
-        int rows = Math.max(weekTimePairs.size(), satTimePairs.size());
+        // 晚自习（仅课表模式显示）：周中时间列追加 night_study.txt 时间段（周一~周五且本地开启时）
+        List<String[]> nightPairs = editMode ? new ArrayList<>() : readNightPairs();
+        List<String[]> weekTimePairsAll = new ArrayList<>(weekTimePairs);
+        weekTimePairsAll.addAll(nightPairs);
+        int rows = Math.max(weekTimePairsAll.size(), satTimePairs.size());
 
         // ===== 构建周一~周五单元格（课表模式应用脚本换课预览，编辑模式显示文件原样）=====
         boolean applyPreview = !editMode;
@@ -619,11 +668,11 @@ public class MainFrame extends JFrame implements ActionListener {
         for (int dayIdx = 0; dayIdx < 5; dayIdx++) {
             List<JComponent> cells = buildDayCells(date, weekTurn, applyPreview);
             // 与周中时间列严格对齐：不足补空位，超出截断（时段增减后由对齐逻辑保证一致）
-            while (cells.size() < weekTimePairs.size()) {
+            while (cells.size() < weekTimePairsAll.size()) {
                 cells.add(emptyCell());
             }
-            if (cells.size() > weekTimePairs.size()) {
-                cells = new ArrayList<>(cells.subList(0, weekTimePairs.size()));
+            if (cells.size() > weekTimePairsAll.size()) {
+                cells = new ArrayList<>(cells.subList(0, weekTimePairsAll.size()));
             }
             dayColumns.add(cells);
             date = date.plusDays(1);
@@ -662,9 +711,9 @@ public class MainFrame extends JFrame implements ActionListener {
             }
             gridPanel.setLayout(new GridLayout(rows, colCount, 6, 6));
             for (int row = 0; row < rows; row++) {
-                // 列0：周中时间
-                gridPanel.add(row < weekTimePairs.size()
-                        ? new TimePane(weekTimePairs.get(row)[0], weekTimePairs.get(row)[1])
+                // 列0：周中时间（含晚自习时间段）
+                gridPanel.add(row < weekTimePairsAll.size()
+                        ? new TimePane(weekTimePairsAll.get(row)[0], weekTimePairsAll.get(row)[1])
                         : new TimePane("", ""));
                 // 列1~5：周一~周五
                 for (int d = 0; d < 5; d++) {
@@ -746,6 +795,14 @@ public class MainFrame extends JFrame implements ActionListener {
             base = sb.toString().trim();
         }
 
+        // 课表模式：晚自习（~）追加到行尾——与 Main.getSchedule 一致
+        // （周一~周五且本地开启时），使晚自习 token 参与换课定位与 load.txt 预览
+        if (!editMode && date.getDayOfWeek().getValue() <= 5
+                && Main.getLocal("HasNightStudy", 0) == 1 && readNightTokens().length >= 2) {
+            base = base.trim();
+            base = base.isEmpty() ? "~" : base + " ~";
+        }
+
         // 课表模式：先应用换课数据文件（data/swap.txt），再 dryRun 执行 load.txt
         // （系统命令跳过），使窗口显示与主课条（真实执行）一致
         if (applyPreview) {
@@ -772,8 +829,8 @@ public class MainFrame extends JFrame implements ActionListener {
         base = SScriptInterpreter.stripFormat(base);
         String[] arr = base.trim().isEmpty() ? new String[0] : base.split(" ");
         for (int j = 0; j < arr.length; j++) {
-            if (Objects.equals(arr[j], "~")) {
-                continue;
+            if (Objects.equals(arr[j], "~") && editMode) {
+                continue; // 编辑模式不显示晚自习（在左侧弹窗中编辑）
             }
             String position = date.getYear() + "@" + date.getMonthValue() + "@" + date.getDayOfMonth() + "@" + j;
             String abbr = arr[j];
@@ -793,6 +850,9 @@ public class MainFrame extends JFrame implements ActionListener {
                         break;
                     case "|":
                         display = Main.iifr != null ? Main.iifr.get("|") : "|";
+                        break;
+                    case "~":
+                        display = Main.iifr != null ? Main.iifr.get("~") : "晚自习";
                         break;
                     default:
                         display = abbr;
@@ -909,17 +969,6 @@ public class MainFrame extends JFrame implements ActionListener {
             showCommandTester();
             return;
         }
-        if (ae.getSource() == saveMirrorBtn) {
-            try {
-                UpdateChecker.saveMirror(mirrorField.getText());
-                mirrorField.setText(UpdateChecker.mirrorBase());
-                updateStatusLabel.setText("镜像已保存：" + UpdateChecker.mirrorBase());
-                System.out.println("[update] 镜像已保存: " + UpdateChecker.mirrorBase());
-            } catch (Exception ex) {
-                Main.outputException(ex);
-            }
-            return;
-        }
         if (ae.getSource() == checkUpdateBtn) {
             updateStatusLabel.setText("检查中…");
             new Thread(() -> {
@@ -931,6 +980,20 @@ public class MainFrame extends JFrame implements ActionListener {
         }
         if (!(ae.getSource() instanceof UnitPane)) return;
         handleUnitPaneClick((UnitPane) ae.getSource());
+    }
+
+    /**
+     * 镜像输入框内容变化即保存到 .local（无需保存按钮）。
+     * 保存时不回写输入框文本，避免光标跳动与监听器死循环。
+     */
+    private void saveMirrorFromField() {
+        try {
+            UpdateChecker.saveMirror(mirrorField.getText());
+            updateStatusLabel.setText("本地版本 v" + UpdateChecker.localVersion()
+                    + " ｜ 镜像：" + UpdateChecker.mirrorDomain());
+        } catch (Exception ex) {
+            Main.outputException(ex);
+        }
     }
 
     /**
@@ -1649,7 +1712,7 @@ public class MainFrame extends JFrame implements ActionListener {
 
     /**
      * 对齐课程行到指定 token 数（类比 Excel 增删列）：
-     * token 多余则截断，不足则补 "\\"（无课）。
+     * token 多余则截断，不足则补 "\"（无课）。
      *
      * @param line  课程行文本
      * @param count 目标 token 数（= 时间对数）
