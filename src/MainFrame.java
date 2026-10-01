@@ -141,12 +141,6 @@ public class MainFrame extends JFrame implements ActionListener {
     // ---- 设置面板按钮 ----
     /** 课程管理：添加/移除/编辑 full_name.txt 中的课程。 */
     private final JButton courseManageBtn = new JButton("添加/移除/编辑课程");
-    /** 更改时段：编辑周一~周五课表的时间行。 */
-    private final JButton timeEditBtn = new JButton("更改时段");
-    /** 周六时段与轮次：编辑 saturday.txt 的时间行与周次轮转行。 */
-    private final JButton saturdayEditBtn = new JButton("周六时段与轮次");
-    /** 晚自习轮次：编辑 self_study.txt 中轮次行末位的晚自习时间。 */
-    private final JButton nightEditBtn = new JButton("晚自习轮次");
     /** 命令测试：打开单测命令窗口。 */
     private final JButton testCmdBtn = new JButton("命令测试");
 
@@ -314,8 +308,8 @@ public class MainFrame extends JFrame implements ActionListener {
         aprilFoolCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         aprilFoolCheck.addActionListener(e -> saveLocalSettings());
 
-        // 课程管理 / 时段 / 周六 / 晚自习 / 命令测试按钮
-        JButton[] settingBtns = {courseManageBtn, timeEditBtn, saturdayEditBtn, nightEditBtn, testCmdBtn};
+        // 课程管理 / 命令测试按钮（时段/周六/晚自习编辑已并入编辑模式网格）
+        JButton[] settingBtns = {courseManageBtn, testCmdBtn};
         for (JButton b : settingBtns) {
             b.setAlignmentX(Component.CENTER_ALIGNMENT);
             b.setMaximumSize(new Dimension(170, 28));
@@ -337,12 +331,6 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.add(aprilFoolCheck);
         tabSettings.add(Box.createVerticalStrut(6));
         tabSettings.add(courseManageBtn);
-        tabSettings.add(Box.createVerticalStrut(4));
-        tabSettings.add(timeEditBtn);
-        tabSettings.add(Box.createVerticalStrut(4));
-        tabSettings.add(saturdayEditBtn);
-        tabSettings.add(Box.createVerticalStrut(4));
-        tabSettings.add(nightEditBtn);
         tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(testCmdBtn);
         tabSettings.add(Box.createVerticalStrut(8));
@@ -388,7 +376,7 @@ public class MainFrame extends JFrame implements ActionListener {
         settingsScroll.getVerticalScrollBar().setUnitIncrement(16);
         settingsScroll.getViewport().setOpaque(false);
         // 组件宽度跟随视口动态收缩，避免硬编码最大宽度（170/180）超过 200px 左栏实际
-        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来"偏移出框架"。
+        // 视口宽（扣除边距与垂直滚动条）导致水平溢出、居中裁切，看起来“偏移出框架”。
         // 只改 maximumSize 无效（BoxLayout 按 preferred 布局），因此 preferred/minimum/
         // maximum 三约束同步钳制为视口可用宽度。
         settingsScroll.getViewport().addComponentListener(new java.awt.event.ComponentAdapter() {
@@ -508,11 +496,8 @@ public class MainFrame extends JFrame implements ActionListener {
             for (Map.Entry<String, String> e : Main.iifr.asMap().entrySet()) {
                 String key = e.getKey();
                 String val = e.getValue();
-                // 跳过空键/空值；空格键（课间）保留，使编辑模式下可见可编辑
+                // 跳过空键/空值；空键条目（如 " "=课间、隐藏字符）保留，使编辑模式下可见可编辑
                 if (key == null || val == null || val.isEmpty()) {
-                    continue;
-                }
-                if (!val.equals(" ") && key.trim().isEmpty()) {
                     continue;
                 }
                 fullToAbbr.put(val, key);
@@ -678,26 +663,13 @@ public class MainFrame extends JFrame implements ActionListener {
             date = date.plusDays(1);
         }
 
-        int colCount;
         if (editMode) {
-            // ===== 编辑模式：仅时间列 + 周一~周五（周六/晚自习在弹窗编辑）=====
-            colCount = 6;
-            String[] dayNames = {"时间", "周一", "周二", "周三", "周四", "周五"};
-            for (String name : dayNames) {
-                headerPanel.add(makeHeaderLabel(name));
-            }
-            gridPanel.setLayout(new GridLayout(rows, colCount, 6, 6));
-            for (int row = 0; row < rows; row++) {
-                gridPanel.add(row < weekTimePairs.size()
-                        ? new TimePane(weekTimePairs.get(row)[0], weekTimePairs.get(row)[1])
-                        : new TimePane("", ""));
-                for (int d = 0; d < 5; d++) {
-                    gridPanel.add(row < dayColumns.get(d).size() ? dayColumns.get(d).get(row) : emptyCell());
-                }
-            }
+            // ===== 编辑模式：纵向三区块（周中 / 周六 / 晚自习），
+            // 时间单元格可调/删除/插入（[开始~结束 − ＋]），轮次周次表头可增删 =====
+            buildEditMode();
         } else {
             // ===== 课表模式：时间 / 周一~五 / 周六时间 / 周六（8 列）=====
-            colCount = 8;
+            int colCount = 8;
             List<JComponent> satCells = buildDayCells(saturday, weekTurn, false);
             while (satCells.size() < satTimePairs.size()) {
                 satCells.add(emptyCell());
@@ -771,7 +743,7 @@ public class MainFrame extends JFrame implements ActionListener {
      * 显示文件原始内容，不应用换课与脚本。</p>
      *
      * @param date         目标日期
-     * @param weekTurn     当前周次（单双周解析与周六行轮转用）
+     * @param weekTurn     当前周次（单双周课程解析与周六行轮转用）
      * @param applyPreview 是否应用脚本换课预览（仅课表模式为 true）
      * @return 该天的课程单元格列表
      * @throws Exception 读取课表文件失败时抛出
@@ -829,9 +801,6 @@ public class MainFrame extends JFrame implements ActionListener {
         base = SScriptInterpreter.stripFormat(base);
         String[] arr = base.trim().isEmpty() ? new String[0] : base.split(" ");
         for (int j = 0; j < arr.length; j++) {
-            if (Objects.equals(arr[j], "~") && editMode) {
-                continue; // 编辑模式不显示晚自习（在左侧弹窗中编辑）
-            }
             String position = date.getYear() + "@" + date.getMonthValue() + "@" + date.getDayOfMonth() + "@" + j;
             String abbr = arr[j];
             if (editMode) {
@@ -953,18 +922,6 @@ public class MainFrame extends JFrame implements ActionListener {
             showCourseManager();
             return;
         }
-        if (ae.getSource() == timeEditBtn) {
-            showTimeEditor();
-            return;
-        }
-        if (ae.getSource() == saturdayEditBtn) {
-            showSaturdayEditor();
-            return;
-        }
-        if (ae.getSource() == nightEditBtn) {
-            showNightEditor();
-            return;
-        }
         if (ae.getSource() == testCmdBtn) {
             showCommandTester();
             return;
@@ -1031,6 +988,28 @@ public class MainFrame extends JFrame implements ActionListener {
      * @param newAbbr  课程简称（写入课表文件的 token）
      */
     private void applyChangeToCell(String position, String newAbbr) {
+        // 轮次区块位置：sec@weekRow@timeIdx（编辑模式周六/晚自习下拉写回）
+        if (position.startsWith("SATURDAY@") || position.startsWith("NIGHT@")) {
+            String[] rp = position.split("@");
+            if (rp.length != 3) {
+                return;
+            }
+            try {
+                EditSection sec = EditSection.valueOf(rp[0]);
+                int weekRow = Integer.parseInt(rp[1]);
+                int timeIdx = Integer.parseInt(rp[2]);
+                writeRotationCell(sec, weekRow, timeIdx, newAbbr);
+            } catch (IllegalArgumentException e) {
+                return;
+            }
+            try {
+                Main.reload();
+                reload();
+            } catch (Exception e) {
+                Main.outputException(e);
+            }
+            return;
+        }
         // 解析 position：year@month@day@index
         String[] parts = position.split("@");
         int year, month, day, index;
@@ -1119,7 +1098,6 @@ public class MainFrame extends JFrame implements ActionListener {
             Main.outputException(e);
             return;
         }
-
         // 清除选择并刷新
         if (swap[0] != null) swap[0].setSelected(false);
         if (swap[1] != null) swap[1].setSelected(false);
@@ -1379,300 +1357,6 @@ public class MainFrame extends JFrame implements ActionListener {
     }
 
     /**
-     * 更改时段：编辑 schedule.txt 的时间行（周一~周五共用）。
-     * 保存时自动将各课程行的课程数对齐到新的时段数（类比 Excel 增删列：
-     * 加时段自动补空课位，减时段自动截断多余课程）。
-     */
-    private void showTimeEditor() {
-        List<String> lines = readAllLines(Main.schedule);
-        String timeLine = lines.isEmpty() ? "" : lines.get(0);
-
-        JDialog dlg = new JDialog(this, "更改时段", true);
-        dlg.setLayout(new BorderLayout(8, 8));
-        dlg.setSize(360, 220);
-        dlg.setLocationRelativeTo(this);
-
-        JLabel hint = new JLabel("<html>周一到周五时间行（空格分隔，HH:mm 成对出现）。<br>保存后各天课程行自动按新时段数增删（多退少补空位）。</html>");
-        hint.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        hint.setBorder(new EmptyBorder(8, 8, 0, 8));
-
-        JTextArea area = new JTextArea(timeLine, 4, 32);
-        area.setFont(new Font("Consolas", Font.PLAIN, 12));
-        JScrollPane areaScroll = new JScrollPane(area);
-        areaScroll.setBorder(new EmptyBorder(4, 8, 4, 8));
-
-        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 6));
-        JButton saveBtn = new JButton("保存");
-        JButton cancelBtn = new JButton("取消");
-        saveBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        cancelBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        btnPanel.add(saveBtn);
-        btnPanel.add(cancelBtn);
-
-        saveBtn.addActionListener(e -> {
-            String text = area.getText().trim();
-            if (!isValidTimeLine(text)) {
-                JOptionPane.showMessageDialog(dlg, "时间格式不正确：需要成对的 HH:mm，用空格分隔", "错误",
-                        JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            int pairs = text.trim().split("\\s+").length / 2;
-            lines.set(0, text);
-            // 对齐各课程行（周一~周五）：token 数 = 时段数，多退少补（"\ "=无课）
-            for (int i = 1; i < lines.size(); i++) {
-                String row = lines.get(i);
-                if (row.trim().isEmpty()) continue;
-                lines.set(i, alignTokens(row, pairs));
-            }
-            writeAllLines(Main.schedule, lines);
-            dlg.dispose();
-            refreshAfterSettingsSaved();
-        });
-        cancelBtn.addActionListener(e -> dlg.dispose());
-
-        dlg.add(hint, BorderLayout.NORTH);
-        dlg.add(areaScroll, BorderLayout.CENTER);
-        dlg.add(btnPanel, BorderLayout.SOUTH);
-        dlg.setVisible(true);
-    }
-
-    /**
-     * 周六时段与轮次：编辑 saturday.txt 的时间行与周次轮转行（行数可自由增删）。
-     * 文件不存在时自动创建（时间行沿用周中时间，轮次行为占位）。
-     */
-    private void showSaturdayEditor() {
-        List<String> lines = readAllLines(Main.saturday);
-        if (lines.isEmpty()) {
-            // 创建默认模板：时间行取 schedule.txt 的时间行
-            List<String> schedLines = readAllLines(Main.schedule);
-            lines.add(schedLines.isEmpty() ? "01:30 02:00 03:30 04:50 05:00 06:25 07:00 08:10 09:25 10:00 10:30 11:00 12:00 13:00" : schedLines.get(0));
-            int pairs = lines.get(0).trim().split("\\s+").length / 2;
-            StringBuilder row = new StringBuilder("六");
-            for (int i = 1; i < pairs; i++) row.append(" \\");
-            for (int i = 0; i < 5; i++) {
-                lines.add(row.toString());
-            }
-        }
-
-        JDialog dlg = new JDialog(this, "周六时段与轮次", true);
-        dlg.setLayout(new BorderLayout(8, 8));
-        dlg.setSize(440, 460);
-        dlg.setLocationRelativeTo(this);
-
-        JLabel hint = new JLabel("<html>第 1 行：周六时间行（成对 HH:mm）。其余行：周次轮转课表（每行一个轮次，行首“六”是第一节课）。</html>");
-        hint.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        hint.setBorder(new EmptyBorder(8, 8, 0, 8));
-
-        JPanel centerPanel = new JPanel();
-        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
-        centerPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
-
-        JTextArea timeArea = new JTextArea(lines.get(0), 2, 36);
-        timeArea.setFont(new Font("Consolas", Font.PLAIN, 12));
-        JScrollPane timeScroll = new JScrollPane(timeArea);
-        timeScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        timeScroll.setPreferredSize(new Dimension(400, 55));
-        centerPanel.add(new JLabel("时间行（" + lines.get(0).split("\\s+").length + " 个时间点）："));
-        centerPanel.add(timeScroll);
-        centerPanel.add(Box.createVerticalStrut(8));
-
-        JTextArea rowsArea = new JTextArea(8, 36);
-        rowsArea.setFont(new Font("微软雅黑", Font.PLAIN, 12));
-        StringBuilder sb = new StringBuilder();
-        for (int i = 1; i < lines.size(); i++) {
-            sb.append(lines.get(i)).append("\n");
-        }
-        rowsArea.setText(sb.toString());
-        JScrollPane rowsScroll = new JScrollPane(rowsArea);
-        rowsScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        rowsScroll.setPreferredSize(new Dimension(400, 220));
-        centerPanel.add(new JLabel("轮次课表（每行一个轮次，可增删）："));
-        centerPanel.add(rowsScroll);
-
-        JPanel rowBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        JButton addRowBtn = new JButton("+ 添加轮次");
-        JButton delRowBtn = new JButton("- 删除最后一行");
-        addRowBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        delRowBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        rowBtns.add(addRowBtn);
-        rowBtns.add(delRowBtn);
-        rowBtns.setAlignmentX(Component.LEFT_ALIGNMENT);
-        centerPanel.add(rowBtns);
-
-        addRowBtn.addActionListener(e -> {
-            String t = rowsArea.getText();
-            String row = "六";
-            String[] tt = timeArea.getText().trim().split("\\s+");
-            int pairs = tt.length >= 2 && tt.length % 2 == 0 ? tt.length / 2 : 7;
-            for (int i = 1; i < pairs; i++) row += " \\";
-            rowsArea.setText(t + (t.isEmpty() ? "" : "\n") + row);
-        });
-        delRowBtn.addActionListener(e -> {
-            String[] ls = rowsArea.getText().split("\n", -1);
-            if (ls.length <= 1) {
-                rowsArea.setText("");
-                return;
-            }
-            StringBuilder sb2 = new StringBuilder();
-            for (int i = 0; i < ls.length - 1; i++) {
-                if (ls[i].trim().isEmpty()) continue;
-                sb2.append(ls[i]).append("\n");
-            }
-            rowsArea.setText(sb2.toString());
-        });
-
-        JScrollPane centerScroll = new JScrollPane(centerPanel);
-        centerScroll.setBorder(null);
-        centerScroll.getVerticalScrollBar().setUnitIncrement(16);
-
-        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 6));
-        JButton saveBtn = new JButton("保存");
-        JButton cancelBtn = new JButton("取消");
-        saveBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        cancelBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        btnPanel.add(saveBtn);
-        btnPanel.add(cancelBtn);
-
-        saveBtn.addActionListener(e -> {
-            // 用户输入直接通过（不做正则/时间格式校验）
-            String timeText = timeArea.getText().trim();
-            int pairs = timeText.split("\\s+").length / 2;
-            List<String> out = new ArrayList<>();
-            out.add(timeText);
-            for (String line : rowsArea.getText().split("\n")) {
-                String t = line.trim();
-                if (t.isEmpty()) continue;
-                out.add(alignTokens(t, pairs));
-            }
-            if (out.size() == 1) {
-                // 轮次被删光：自动补一行占位课表
-                StringBuilder row = new StringBuilder("六");
-                for (int i = 1; i < pairs; i++) row.append(" \\");
-                out.add(row.toString());
-            }
-            writeAllLines(Main.saturday, out);
-            dlg.dispose();
-            refreshAfterSettingsSaved();
-        });
-        cancelBtn.addActionListener(e -> dlg.dispose());
-
-        dlg.add(hint, BorderLayout.NORTH);
-        dlg.add(centerScroll, BorderLayout.CENTER);
-        dlg.add(btnPanel, BorderLayout.SOUTH);
-        dlg.setVisible(true);
-    }
-
-    /**
-     * 晚自习轮次：编辑 self_study.txt —— 第 0 行为自习时间行，
-     * 其余行为周次轮转行（前 6 个 token 为周一~周六自习科目）。
-     * 行数可自由增删。晚自习时间段独立存放于 night_study.txt。
-     */
-    private void showNightEditor() {
-        List<String> lines = readAllLines(Main.sstudy);
-
-        JDialog dlg = new JDialog(this, "晚自习轮次", true);
-        dlg.setLayout(new BorderLayout(8, 8));
-        dlg.setSize(460, 480);
-        dlg.setLocationRelativeTo(this);
-
-        JLabel hint = new JLabel("<html>文件 self_study.txt。第 1 行：自习时间（成对 HH:mm）。<br>其余行：周次轮转行（前 6 个 token 为周一~周六自习科目）。<br>晚自习时间段在 night_study.txt（周一~周五且本地开启时生效）。</html>");
-        hint.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        hint.setBorder(new EmptyBorder(8, 8, 0, 8));
-
-        JPanel centerPanel = new JPanel();
-        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
-        centerPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
-
-        JTextArea timeArea = new JTextArea(lines.isEmpty() ? "17:00 18:00" : lines.get(0), 2, 36);
-        timeArea.setFont(new Font("Consolas", Font.PLAIN, 12));
-        JScrollPane timeScroll = new JScrollPane(timeArea);
-        timeScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        timeScroll.setPreferredSize(new Dimension(420, 55));
-        centerPanel.add(new JLabel("自习时间行："));
-        centerPanel.add(timeScroll);
-        centerPanel.add(Box.createVerticalStrut(8));
-
-        JTextArea rowsArea = new JTextArea(7, 36);
-        rowsArea.setFont(new Font("微软雅黑", Font.PLAIN, 12));
-        StringBuilder sb = new StringBuilder();
-        for (int i = 1; i < lines.size(); i++) {
-            sb.append(lines.get(i)).append("\n");
-        }
-        rowsArea.setText(sb.toString());
-        JScrollPane rowsScroll = new JScrollPane(rowsArea);
-        rowsScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        rowsScroll.setPreferredSize(new Dimension(420, 200));
-        centerPanel.add(new JLabel("轮次行（每行一个轮次，可增删）："));
-        centerPanel.add(rowsScroll);
-
-        JPanel rowBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-        JButton addRowBtn = new JButton("+ 添加轮次");
-        JButton delRowBtn = new JButton("- 删除最后一行");
-        addRowBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        delRowBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        rowBtns.add(addRowBtn);
-        rowBtns.add(delRowBtn);
-        rowBtns.setAlignmentX(Component.LEFT_ALIGNMENT);
-        centerPanel.add(rowBtns);
-
-        addRowBtn.addActionListener(e -> {
-            String t = rowsArea.getText();
-            String row = "\\ \\ \\ \\ \\ \\";
-            rowsArea.setText(t + (t.isEmpty() ? "" : "\n") + row);
-        });
-        delRowBtn.addActionListener(e -> {
-            String[] ls = rowsArea.getText().split("\n", -1);
-            if (ls.length <= 1) {
-                rowsArea.setText("");
-                return;
-            }
-            StringBuilder sb2 = new StringBuilder();
-            for (int i = 0; i < ls.length - 1; i++) {
-                if (ls[i].trim().isEmpty()) continue;
-                sb2.append(ls[i]).append("\n");
-            }
-            rowsArea.setText(sb2.toString());
-        });
-
-        JScrollPane centerScroll = new JScrollPane(centerPanel);
-        centerScroll.setBorder(null);
-        centerScroll.getVerticalScrollBar().setUnitIncrement(16);
-
-        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 6));
-        JButton saveBtn = new JButton("保存");
-        JButton cancelBtn = new JButton("取消");
-        saveBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        cancelBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
-        btnPanel.add(saveBtn);
-        btnPanel.add(cancelBtn);
-
-        saveBtn.addActionListener(e -> {
-            // 用户输入直接通过（不做正则/时间格式校验）
-            String timeText = timeArea.getText().trim();
-            List<String> out = new ArrayList<>();
-            out.add(timeText);
-            for (String line : rowsArea.getText().split("\n")) {
-                String t = line.trim();
-                if (t.isEmpty()) continue;
-                out.add(t);
-            }
-            if (out.size() == 1) {
-                // 轮次被删光：补一行默认自习行
-                out.add("\\ \\ \\ \\ \\ \\");
-            }
-            writeAllLines(Main.sstudy, out);
-            dlg.dispose();
-            refreshAfterSettingsSaved();
-        });
-        cancelBtn.addActionListener(e -> dlg.dispose());
-
-        dlg.add(hint, BorderLayout.NORTH);
-        dlg.add(centerScroll, BorderLayout.CENTER);
-        dlg.add(btnPanel, BorderLayout.SOUTH);
-        dlg.setVisible(true);
-    }
-
-    /**
      * 设置保存后统一刷新：主课条 + 本窗口网格。
      */
     private void refreshAfterSettingsSaved() {
@@ -1682,6 +1366,511 @@ public class MainFrame extends JFrame implements ActionListener {
         } catch (Exception ex) {
             Main.outputException(ex);
         }
+    }
+
+    // ==================================================================
+    // 编辑模式（v1.4.0）：纵向三区块 —— 周中 / 周六 / 晚自习
+    // 时间单元格 [开始~结束 − ＋]：点击编辑、− 删除该时段、＋ 下方插入新时段
+    // 轮次区块表头 [第N周 −] [＋]：− 删除该周次轮次行、＋ 追加新周次轮次行
+    // ==================================================================
+
+    /** 编辑区块类型：对应数据文件与写回目标。 */
+    private enum EditSection {
+        WEEK(Main.schedule, "周中"),
+        SATURDAY(Main.saturday, "周六"),
+        NIGHT(Main.sstudy, "晚自习");
+
+        final File file;
+        final String name;
+
+        EditSection(File file, String name) {
+            this.file = file;
+            this.name = name;
+        }
+    }
+
+    /**
+     * 构建编辑模式的三区块布局（放入右侧内容面板，纵向排列）。
+     */
+    private void buildEditMode() {
+        gridPanel.setLayout(new BoxLayout(gridPanel, BoxLayout.Y_AXIS));
+
+        // ===== 区块1：周中（周一~周五，schedule.txt）=====
+        List<String[]> weekPairs = readTimePairs(Main.schedule);
+        gridPanel.add(sectionLabel("周中（周一~周五）"));
+
+        JPanel wHeader = new JPanel(new GridLayout(1, 6, 6, 0));
+        wHeader.setOpaque(false);
+        wHeader.add(makeHeaderLabel("时间"));
+        for (String n : new String[]{"周一", "周二", "周三", "周四", "周五"}) {
+            wHeader.add(makeHeaderLabel(n));
+        }
+        gridPanel.add(wHeader);
+
+        LocalDate monday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        int wRows = Math.max(1, weekPairs.size());
+        JPanel wGrid = new JPanel(new GridLayout(wRows, 6, 6, 6));
+        wGrid.setOpaque(false);
+        for (int r = 0; r < wRows; r++) {
+            String[] p = r < weekPairs.size() ? weekPairs.get(r) : new String[]{"", ""};
+            wGrid.add(new EditableTimePane(EditSection.WEEK, r, p[0], p[1]));
+            for (int d = 0; d < 5; d++) {
+                List<JComponent> cells = dayCellsFor(monday.plusDays(d), wRows);
+                wGrid.add(r < cells.size() ? cells.get(r) : emptyCell());
+            }
+        }
+        gridPanel.add(wGrid);
+        gridPanel.add(Box.createVerticalStrut(14));
+
+        // ===== 区块2：周六（saturday.txt）=====
+        buildRotationSection(EditSection.SATURDAY);
+        gridPanel.add(Box.createVerticalStrut(14));
+
+        // ===== 区块3：晚自习（self_study.txt）=====
+        buildRotationSection(EditSection.NIGHT);
+
+        gridPanel.revalidate();
+        gridPanel.repaint();
+    }
+
+    /**
+     * 构建轮次区块（周六 / 晚自习）：行 = 时间段，列 = 周次轮次行。
+     * 表头：时间 | [第1周 −] [第2周 −] ... | [＋ 追加周次]
+     */
+    private void buildRotationSection(EditSection section) {
+        List<String> lines = readAllLines(section.file);
+        if (lines.isEmpty()) {
+            lines = defaultSectionLines(section);
+        }
+        String[] timeTokens = lines.get(0).trim().isEmpty()
+                ? new String[0] : lines.get(0).trim().split("\\s+");
+        List<String[]> pairs = pairsFromTokens(timeTokens);
+        List<String> rowLines = new ArrayList<>(lines.subList(1, lines.size()));
+        if (rowLines.isEmpty()) {
+            rowLines.add(defaultRow(section, Math.max(1, pairs.size())));
+        }
+
+        gridPanel.add(sectionLabel(section.name + "（" + section.file.getName() + "）"));
+
+        int cols = 1 + rowLines.size() + 1; // 时间列 + 各周次列 + [＋]
+        JPanel header = new JPanel(new GridLayout(1, cols, 6, 0));
+        header.setOpaque(false);
+        header.add(makeHeaderLabel("时间"));
+        for (int w = 0; w < rowLines.size(); w++) {
+            header.add(new WeekHeaderCell(section, w));
+        }
+        header.add(new AddWeekCell(section));
+        gridPanel.add(header);
+
+        int rows = Math.max(1, pairs.size());
+        JPanel grid = new JPanel(new GridLayout(rows, cols, 6, 6));
+        grid.setOpaque(false);
+        for (int r = 0; r < rows; r++) {
+            String[] p = r < pairs.size() ? pairs.get(r) : new String[]{"", ""};
+            grid.add(new EditableTimePane(section, r, p[0], p[1]));
+            for (int w = 0; w < rowLines.size(); w++) {
+                String[] tokens = alignTokensArr(rowLines.get(w), pairs.size());
+                String abbr = r < tokens.length ? tokens[r] : "\\";
+                grid.add(rotationCell(section, w, r, abbr));
+            }
+        }
+        gridPanel.add(grid);
+    }
+
+    /** 轮次区块的默认文件内容（文件不存在/为空时使用）。 */
+    private static List<String> defaultSectionLines(EditSection section) {
+        List<String> lines = new ArrayList<>();
+        lines.add("17:00 18:00"); // 默认时间行
+        lines.add(defaultRow(section, 2));
+        return lines;
+    }
+
+    /** 轮次区块追加行的默认课程行（行首 token 也是真实第一节课）。 */
+    private static String defaultRow(EditSection section, int pairs) {
+        int n = Math.max(1, pairs);
+        if (section == EditSection.SATURDAY) {
+            StringBuilder sb = new StringBuilder("六");
+            for (int i = 1; i < n; i++) sb.append(" \\");
+            return sb.toString();
+        }
+        // NIGHT（self_study.txt）：行首星期前缀（debug），追加行用 \ 占位
+        String[] t = new String[n];
+        Arrays.fill(t, "\\");
+        return String.join(" ", t);
+    }
+
+    /** 区块标题（编辑模式各区块分隔）。 */
+    private static JLabel sectionLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(new Font("微软雅黑", Font.BOLD, 13));
+        l.setForeground(new Color(70, 70, 70));
+        l.setBorder(BorderFactory.createEmptyBorder(6, 0, 4, 0));
+        return l;
+    }
+
+    /** 时间点成对配对（去前导零、忽略起止相同的占位对）。 */
+    private static List<String[]> pairsFromTokens(String[] t) {
+        List<String[]> pairs = new ArrayList<>();
+        for (int i = 0; i + 1 < t.length; i += 2) {
+            String s = stripLeadingZero(t[i]);
+            String e = stripLeadingZero(t[i + 1]);
+            if (!Objects.equals(s, e)) {
+                pairs.add(new String[]{s, e});
+            }
+        }
+        return pairs;
+    }
+
+    /** 轮次行 token 对齐到时间段数（多截断、少补 \）。 */
+    private static String[] alignTokensArr(String line, int count) {
+        String[] t = line == null || line.trim().isEmpty() ? new String[0] : line.trim().split("\\s+");
+        if (t.length >= count) {
+            return Arrays.copyOf(t, count);
+        }
+        String[] r = Arrays.copyOf(t, count);
+        Arrays.fill(r, t.length, count, "\\");
+        return r;
+    }
+
+    /** 周中某一天的课程单元格（编辑模式，位置 year@month@day@index）。 */
+    private List<JComponent> dayCellsFor(LocalDate date, int count) {
+        try {
+            List<JComponent> cells = buildDayCells(date, Main.getLocal("WeekTurn", 1), false);
+            while (cells.size() < count) {
+                cells.add(emptyCell());
+            }
+            return cells.size() > count ? new ArrayList<>(cells.subList(0, count)) : cells;
+        } catch (Exception e) {
+            List<JComponent> cells = new ArrayList<>();
+            for (int i = 0; i < count; i++) cells.add(emptyCell());
+            return cells;
+        }
+    }
+
+    /** 轮次区块的课程单元格（位置 sec@weekRow@timeIdx）。 */
+    private JComponent rotationCell(EditSection section, int weekRow, int timeIdx, String abbr) {
+        if (Objects.equals(abbr, "\\")) {
+            return emptyCell();
+        }
+        String pos = section.name() + "@" + weekRow + "@" + timeIdx;
+        return new ComboCell(pos, abbr.isEmpty() ? " " : abbr);
+    }
+
+    /** 编辑模式时间单元格：显示 [开始~结束]，点击编辑、− 删除、＋ 下方插入。 */
+    private final class EditableTimePane extends JPanel {
+        private final EditSection section;
+        private final int timeIndex;
+
+        EditableTimePane(EditSection section, int timeIndex, String start, String end) {
+            this.section = section;
+            this.timeIndex = timeIndex;
+            setOpaque(false);
+            setPreferredSize(new Dimension(70, 50));
+            setLayout(new BorderLayout(0, 1));
+
+            JLabel timeLabel = new JLabel(
+                    start == null || start.isEmpty() ? "（空）" : start + "~" + end,
+                    SwingConstants.CENTER);
+            timeLabel.setFont(TIME_FONT);
+            timeLabel.setForeground(new Color(60, 60, 60));
+            timeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            timeLabel.setToolTipText("点击编辑时间段");
+            timeLabel.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    editTime();
+                }
+            });
+
+            JButton minus = smallBtn("−", "删除该时间段（同时删除各天对应课程列）");
+            minus.addActionListener(e -> deleteTime());
+            JButton plus = smallBtn("＋", "在下方插入新时间段（同时各天补空课位）");
+            plus.addActionListener(e -> addTime());
+
+            JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 0));
+            btnRow.setOpaque(false);
+            btnRow.add(minus);
+            btnRow.add(plus);
+
+            add(timeLabel, BorderLayout.CENTER);
+            add(btnRow, BorderLayout.SOUTH);
+        }
+
+        /** 点击时间文本：弹输入框修改开始/结束时间。 */
+        private void editTime() {
+            String[] cur = currentTimePair();
+            JTextField sField = new JTextField(cur[0], 5);
+            JTextField eField = new JTextField(cur[1], 5);
+            Object[] msg = {"开始时间（HH:mm）", sField, "结束时间（HH:mm）", eField};
+            int r = JOptionPane.showConfirmDialog(MainFrame.this, msg,
+                    "编辑时间段 - " + section.name, JOptionPane.OK_CANCEL_OPTION);
+            if (r != JOptionPane.OK_OPTION) return;
+            String s = sField.getText().trim();
+            String e = eField.getText().trim();
+            if (!isValidTimeToken(s) || !isValidTimeToken(e)) {
+                JOptionPane.showMessageDialog(MainFrame.this,
+                        "时间格式不正确：需要 HH:mm", "错误", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            editTimeInFile(section, timeIndex, s, e);
+            refreshAfterSettingsSaved();
+        }
+
+        /** − 按钮：删除该时间段。 */
+        private void deleteTime() {
+            String[] cur = currentTimePair();
+            int r = JOptionPane.showConfirmDialog(MainFrame.this,
+                    "删除时间段 " + cur[0] + "~" + cur[1] + "？\n（同时删除各天对应课程列）",
+                    "删除时间段", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (r != JOptionPane.OK_OPTION) return;
+            deleteTimeInFile(section, timeIndex);
+            refreshAfterSettingsSaved();
+        }
+
+        /** ＋ 按钮：在下方插入新时间段（预填上一段结束 ~ 推 45 分钟）。 */
+        private void addTime() {
+            String[] prev = previousTimePair();
+            String defS = prev[1];
+            String defE = plusMinutes(prev[1], 45);
+            JTextField sField = new JTextField(defS, 5);
+            JTextField eField = new JTextField(defE, 5);
+            Object[] msg = {"开始时间（HH:mm）", sField, "结束时间（HH:mm）", eField};
+            int r = JOptionPane.showConfirmDialog(MainFrame.this, msg,
+                    "插入时间段", JOptionPane.OK_CANCEL_OPTION);
+            if (r != JOptionPane.OK_OPTION) return;
+            String s = sField.getText().trim();
+            String e = eField.getText().trim();
+            if (!isValidTimeToken(s) || !isValidTimeToken(e)) {
+                JOptionPane.showMessageDialog(MainFrame.this,
+                        "时间格式不正确：需要 HH:mm", "错误", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            insertTimeInFile(section, timeIndex, s, e);
+            refreshAfterSettingsSaved();
+        }
+
+        private String[] currentTimePair() {
+            List<String[]> pairs = pairsFromTokens(timeTokens(section.file));
+            return timeIndex < pairs.size() ? pairs.get(timeIndex) : new String[]{"", ""};
+        }
+
+        private String[] previousTimePair() {
+            List<String[]> pairs = pairsFromTokens(timeTokens(section.file));
+            if (timeIndex > 0 && timeIndex - 1 < pairs.size()) {
+                return pairs.get(timeIndex - 1);
+            }
+            if (!pairs.isEmpty()) {
+                return pairs.get(pairs.size() - 1);
+            }
+            return new String[]{"", ""};
+        }
+    }
+
+    /** 轮次区块周次表头：[第N周 −]。 */
+    private final class WeekHeaderCell extends JPanel {
+        WeekHeaderCell(EditSection section, int weekRow) {
+            setOpaque(false);
+            setLayout(new BorderLayout(2, 0));
+            JLabel lbl = new JLabel("第" + (weekRow + 1) + "周", SwingConstants.CENTER);
+            lbl.setFont(new Font("微软雅黑", Font.PLAIN, 10));
+            lbl.setForeground(new Color(70, 70, 70));
+            JButton del = smallBtn("−", "删除第 " + (weekRow + 1) + " 周轮次行");
+            del.addActionListener(e -> {
+                deleteWeekInFile(section, weekRow);
+                refreshAfterSettingsSaved();
+            });
+            add(lbl, BorderLayout.CENTER);
+            add(del, BorderLayout.EAST);
+        }
+    }
+
+    /** 轮次区块追加周次表头：[＋]。 */
+    private final class AddWeekCell extends JPanel {
+        AddWeekCell(EditSection section) {
+            setOpaque(false);
+            setLayout(new FlowLayout(FlowLayout.CENTER, 2, 0));
+            JButton add = smallBtn("＋", "追加新的周次轮次行");
+            add.addActionListener(e -> {
+                addWeekInFile(section);
+                refreshAfterSettingsSaved();
+            });
+            add(add);
+        }
+    }
+
+    /** 小按钮统一样式。 */
+    private static JButton smallBtn(String text, String tip) {
+        JButton b = new JButton(text);
+        b.setFont(new Font("微软雅黑", Font.PLAIN, 9));
+        b.setMargin(new Insets(0, 2, 0, 2));
+        b.setPreferredSize(new Dimension(22, 16));
+        b.setToolTipText(tip);
+        return b;
+    }
+
+    // ---- 时间/轮次文件操作（编辑模式共用）----
+
+    /** 读取文件第 0 行的时间点数组。 */
+    private static String[] timeTokens(File f) {
+        List<String> lines = readAllLines(f);
+        if (lines.isEmpty() || lines.get(0).trim().isEmpty()) {
+            return new String[0];
+        }
+        return lines.get(0).trim().split("\\s+");
+    }
+
+    private static boolean isValidTimeToken(String t) {
+        return t != null && TIME_TOKEN.matcher(t).matches();
+    }
+
+    /** HH:mm + 分钟（用于插入预填），超出 24:00 时按 23:59 封顶。 */
+    private static String plusMinutes(String hhmm, int minutes) {
+        if (hhmm == null || !hhmm.contains(":")) return "";
+        try {
+            String[] p = hhmm.split(":");
+            int h = Integer.parseInt(p[0]);
+            int m = Integer.parseInt(p[1]);
+            int total = h * 60 + m + minutes;
+            total = Math.min(total, 23 * 60 + 59);
+            return String.format("%d:%02d", total / 60, total % 60);
+        } catch (NumberFormatException e) {
+            return "";
+        }
+    }
+
+    /** 修改时间段：替换时间行第 idx 对。 */
+    private static void editTimeInFile(EditSection sec, int idx, String s, String e) {
+        List<String> lines = readAllLines(sec.file);
+        if (lines.isEmpty()) lines.add("");
+        String[] toks = timeTokens(sec.file);
+        if (toks.length < idx * 2 + 2) {
+            String[] nt = Arrays.copyOf(toks, idx * 2 + 2);
+            Arrays.fill(nt, toks.length, idx * 2 + 2, "00:00");
+            toks = nt;
+        }
+        toks[idx * 2] = s;
+        toks[idx * 2 + 1] = e;
+        lines.set(0, String.join(" ", toks));
+        writeAllLines(sec.file, lines);
+    }
+
+    /** 删除时间段：时间行删一对，各课程行删对应 token。 */
+    private static void deleteTimeInFile(EditSection sec, int idx) {
+        List<String> lines = readAllLines(sec.file);
+        if (lines.isEmpty()) return;
+        String[] toks = timeTokens(sec.file);
+        if (idx * 2 + 1 >= toks.length) return;
+        List<String> tl = new ArrayList<>(Arrays.asList(toks));
+        tl.remove(idx * 2 + 1);
+        tl.remove(idx * 2);
+        lines.set(0, String.join(" ", tl));
+        for (int i = 1; i < lines.size(); i++) {
+            lines.set(i, removeTokenAt(lines.get(i), idx));
+        }
+        writeAllLines(sec.file, lines);
+    }
+
+    /** 插入时间段：时间行插一对，各课程行对应位置插 \。 */
+    private static void insertTimeInFile(EditSection sec, int idx, String s, String e) {
+        List<String> lines = readAllLines(sec.file);
+        if (lines.isEmpty()) lines.add("");
+        List<String> tl = new ArrayList<>(Arrays.asList(timeTokens(sec.file)));
+        if (idx * 2 > tl.size()) idx = tl.size() / 2; // 越界时追加到末尾
+        tl.add(idx * 2, e);
+        tl.add(idx * 2, s);
+        lines.set(0, String.join(" ", tl));
+        for (int i = 1; i < lines.size(); i++) {
+            lines.set(i, insertTokenAt(lines.get(i), idx, "\\"));
+        }
+        writeAllLines(sec.file, lines);
+    }
+
+    /** 删除课程行中第 idx 个真实课程 token（保留格式前缀，未找到时删除末 token 兜底）。 */
+    private static String removeTokenAt(String row, int idx) {
+        String[] raw = row == null || row.trim().isEmpty() ? new String[0] : row.trim().split("\\s+");
+        List<String> out = new ArrayList<>();
+        int real = -1;
+        boolean removed = false;
+        for (String t : raw) {
+            if (!SScriptInterpreter.stripFormat(t).isEmpty()) real++;
+            if (real == idx && !removed) {
+                removed = true;
+                continue;
+            }
+            out.add(t);
+        }
+        if (!removed && !out.isEmpty()) {
+            out.remove(out.size() - 1);
+        }
+        return String.join(" ", out);
+    }
+
+    /** 在课程行第 idx 个真实课程 token 前插入 token（未找到时追加到末尾）。 */
+    private static String insertTokenAt(String row, int idx, String token) {
+        String[] raw = row == null || row.trim().isEmpty() ? new String[0] : row.trim().split("\\s+");
+        List<String> out = new ArrayList<>();
+        int real = -1;
+        boolean inserted = false;
+        for (String t : raw) {
+            if (!SScriptInterpreter.stripFormat(t).isEmpty()) real++;
+            if (real == idx && !inserted) {
+                out.add(token);
+                inserted = true;
+            }
+            out.add(t);
+        }
+        if (!inserted) {
+            out.add(token);
+        }
+        return String.join(" ", out);
+    }
+
+    /** 删除轮次行（至少保留一行）。 */
+    private static void deleteWeekInFile(EditSection sec, int weekRow) {
+        List<String> lines = readAllLines(sec.file);
+        if (lines.size() <= 2) return; // 时间行 + 至少一行轮次
+        int idx = 1 + weekRow;
+        if (idx < lines.size()) {
+            lines.remove(idx);
+            writeAllLines(sec.file, lines);
+        }
+    }
+
+    /** 追加新的轮次行（行首 token 也是真实第一节课）。 */
+    private static void addWeekInFile(EditSection sec) {
+        List<String> lines = readAllLines(sec.file);
+        if (lines.isEmpty()) {
+            lines = defaultSectionLines(sec);
+        }
+        int pairs = timeTokens(sec.file).length / 2;
+        lines.add(defaultRow(sec, Math.max(1, pairs)));
+        writeAllLines(sec.file, lines);
+    }
+
+    /** 轮次区块写入课程：sec@weekRow@timeIdx。 */
+    private void writeRotationCell(EditSection sec, int weekRow, int timeIdx, String newAbbr) {
+        List<String> lines = readAllLines(sec.file);
+        int lineIndex = 1 + weekRow;
+        if (lineIndex >= lines.size()) return;
+        String[] raw = lines.get(lineIndex) == null || lines.get(lineIndex).trim().isEmpty()
+                ? new String[0] : lines.get(lineIndex).trim().split("\\s+");
+        int real = -1;
+        boolean found = false;
+        for (int k = 0; k < raw.length; k++) {
+            String st = SScriptInterpreter.stripFormat(raw[k]);
+            if (!st.isEmpty()) {
+                real++;
+                if (real == timeIdx) {
+                    String prefix = raw[k].substring(0, raw[k].length() - st.length());
+                    raw[k] = prefix + newAbbr;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) return;
+        lines.set(lineIndex, String.join(" ", raw));
+        writeAllLines(sec.file, lines);
     }
 
     // ==================================================================
@@ -1696,39 +1885,6 @@ public class MainFrame extends JFrame implements ActionListener {
 
     /** HH:mm 时间点校验。 */
     private static final Pattern TIME_TOKEN = Pattern.compile("^\\d{1,2}:\\d{2}$");
-
-    /**
-     * 校验时间行：非空、token 数为偶数、每个 token 形如 HH:mm。
-     */
-    private static boolean isValidTimeLine(String text) {
-        if (text == null || text.trim().isEmpty()) return false;
-        String[] tokens = text.trim().split("\\s+");
-        if (tokens.length < 2 || tokens.length % 2 != 0) return false;
-        for (String t : tokens) {
-            if (!TIME_TOKEN.matcher(t).matches()) return false;
-        }
-        return true;
-    }
-
-    /**
-     * 对齐课程行到指定 token 数（类比 Excel 增删列）：
-     * token 多余则截断，不足则补 "\"（无课）。
-     *
-     * @param line  课程行文本
-     * @param count 目标 token 数（= 时间对数）
-     * @return 对齐后的课程行
-     */
-    private static String alignTokens(String line, int count) {
-        String[] tokens = line.trim().split("\\s+");
-        if (tokens.length > count) {
-            return String.join(" ", Arrays.copyOf(tokens, count));
-        }
-        List<String> list = new ArrayList<>(Arrays.asList(tokens));
-        while (list.size() < count) {
-            list.add("\\");
-        }
-        return String.join(" ", list);
-    }
 
     /**
      * 读取文件全部行（UTF-8），文件不存在或读取失败时返回空列表。
