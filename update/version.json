@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
-  "note": "设置界面滚动条过长修复（压缩自动更新区/合并镜像输入、窗口默认高度提升）；镜像配置只写域名（仓库路径 RS6048/Schedule-On-Top/main 下载时自动追加、值改变即保存到 data/.local、删除保存镜像按钮，留空=默认 GitHub 直连）；晚自习加入换课显示（课表模式周中时间列追加 night_study.txt 时间段、周一~五列显示晚自习课程块并可参与换课，编辑模式仍不显示）；换课模式周次直接显示当前周次、左右切换周次时下方日期随周次联动变化、上一周/下一周按钮同行",
+  "version": "1.7.0",
+  "note": "版本号改为硬编码（移除 version.txt，版本随源码编译、重启生效）；新增“启动时检查更新”开关（存于 data/.local 第 7 行，设置面板可勾选，关闭后启动不再自动检查，仍可手动点“检查更新”）；其余保持：下载清单以远端 version.json 为准、单条 404 跳过、load/tick 脚本内存缓存与整文件校验、NoticeWindow 白底黑字无圆角、admcmd 管理员命令",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
@@ -9,7 +9,6 @@
     "src/ScriptSplash.java",
     "src/NoticeWindow.java",
     "src/CircleAnimationWindow.java",
-    "src/CommentWindow.java",
     "src/SimpleWindow.java",
     "src/TimeChecker.java",
     "src/IniFileReader.java",

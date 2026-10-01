@@ -20,7 +20,6 @@ import java.util.List;
  * <ul>
  *   <li>鼠标拖拽移动窗口，靠近顶部自动吸附；</li>
  *   <li>单击隐藏并弹出通知面板，连续点击超过 3 次触发保护提示；</li>
- *   <li>从屏幕下方释放时召唤屏幕便签（最多 6 个）；</li>
  *   <li>支持主题色调节与愚人节彩蛋。</li>
  * </ul>
  */
@@ -44,11 +43,8 @@ public class MainWindow extends JWindow {
     /** 连续点击重置间隔（毫秒）。 */
     private static final int CLICK_RESET_DELAY = 60_000;
 
-    /** 召唤便签的 Y 坐标阈值。 */
-    private static final int COMMENT_SUMMON_Y = 500;
-
-    /** 最多同时存在的便签数量。 */
-    private static final int MAX_COMMENTS = 6;
+    /** 背景色分界 Y：窗口 y &lt; 此值用白底，否则用浅灰底（视觉区分吸附/悬浮）。 */
+    private static final int SNAP_BG_THRESHOLD_Y = 500;
 
     // ---- 当前课程状态 ----
     /** 当前课程在课表中的索引，-1 表示无。 */
@@ -73,8 +69,6 @@ public class MainWindow extends JWindow {
     // ---- 交互状态 ----
     /** 连续点击计数。 */
     public static int clickTimes = 0;
-    /** 全局便签计数。 */
-    public static short commentNumber = 0;
 
     // ---- 布局计算缓存 ----
     private int grayX, grayLength, lastLength;
@@ -85,7 +79,6 @@ public class MainWindow extends JWindow {
     private Timer slideTimer;
     private Timer snapTimer;
     private Timer clickResetTimer;
-    private boolean commentSummoned = false;
 
     /**
      * 格式化文本段：strip 后的文本 + 颜色 + 背景色 + 样式标志。
@@ -204,7 +197,9 @@ public class MainWindow extends JWindow {
         if (clickTimes > 2) {
             clickResetTimer.stop();
             System.out.println("Clicked " + clickTimes + ", hiding with warning...");
-            new NoticeWindow("主窗口已隐藏，请前往系统托盘使其显示", 10000).setVisible(true);
+            // 不联动主课条：警告语义为"请前往系统托盘恢复"，通知关闭后不自动恢复
+            new NoticeWindow("主窗口已隐藏，请前往系统托盘使其显示", 10000)
+                    .setNoMainLink().setVisible(true);
             return;
         }
         cd.setVisible(true);
@@ -243,48 +238,23 @@ public class MainWindow extends JWindow {
     private int slideDirection = 0;
 
     /**
-     * 用 Timer 动画将窗口吸附到顶部，过程中检测便签召唤。
+     * 用 Timer 动画将窗口吸附到顶部。
      */
     private void animateSnapToTop() {
         if (snapTimer != null && snapTimer.isRunning()) {
             snapTimer.stop();
         }
-        commentSummoned = false;
         snapTimer = new Timer(5, e -> {
             int y = getY();
             if (y <= 0) {
                 setLocation(getX(), 0);
                 snapped = true;
-                commentSummoned = false;
                 snapTimer.stop();
                 return;
-            }
-            // 从屏幕下方经过时召唤便签（仅一次）
-            if (y > COMMENT_SUMMON_Y && !commentSummoned) {
-                commentSummoned = true;
-                summonComment();
             }
             setLocation(getX(), y - SNAP_STEP);
         });
         snapTimer.start();
-    }
-
-    /**
-     * 召唤一个屏幕便签，超过上限时提示。
-     */
-    private void summonComment() {
-        if (commentNumber < MAX_COMMENTS) {
-            CommentWindow cw = new CommentWindow();
-            cw.setSize(320, 180);
-            cw.setLocation(getX(), getY() - 180);
-            cw.setAlwaysOnTop(true);
-            cw.setVisible(true);
-            cw.toFront();
-            commentNumber++;
-            System.out.println("Comments summoned, total: " + commentNumber);
-        } else {
-            new NoticeWindow("最多支持6个屏幕评论", 10000).setVisible(true);
-        }
     }
 
     /**
@@ -576,7 +546,7 @@ public class MainWindow extends JWindow {
 
         if (drawBg) {
             // 背景色：吸附在顶部时用纯白，脱离顶部时用浅灰（视觉区分）
-            Color bg = getY() < COMMENT_SUMMON_Y ? Color.WHITE : new Color(208, 208, 208);
+            Color bg = getY() < SNAP_BG_THRESHOLD_Y ? Color.WHITE : new Color(208, 208, 208);
             g.setColor(bg);
             int bgY = snapped ? -10 : 0;
             int bgH = h + (snapped ? 10 : 0);

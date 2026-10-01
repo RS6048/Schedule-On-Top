@@ -1,3 +1,6 @@
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.Font;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -10,19 +13,27 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.BorderFactory;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 
 /**
  * 自动更新检查器。
  *
  * <p>从远程仓库（GitHub raw 或国内镜像）拉取 {@code update/version.json}，
- * 与本地 {@code version.txt} 比对版本；有新版时下载清单中列出的文件覆盖本地源码，
- * 并尝试用 javac 重新编译到 {@code out/production/ScrollSched}（IDEA 输出布局）。
- * 更新后需重启程序生效。</p>
+ * 与内置（硬编码）版本号比对；有新版时<b>按远端 version.json 的 files 清单</b>
+ * 下载文件覆盖本地源码（本地文件不参与文件列表的生成），并尝试用 javac 重新编译到
+ * {@code out/production/ScrollSched}（IDEA 输出布局）。更新后需重启程序生效。</p>
  *
- * <p>镜像配置：镜像<b>只写域名</b>（存于 {@code data/.local} 第 6 行，如
- * {@code ghproxy.net}、{@code gitee.com}）——仓库信息
+ * <p>清单容错：若远端清单中残留了新版本已删除的旧文件（如历史上的
+ * {@code src/CommentWindow.java}），下载时该文件返回 404 会被跳过，不影响其余文件
+ * 与整体更新流程——不会因单条过期清单条目而更新失败。</p>
+ *
+ * <p>镜像配置：镜像<b>保留完整地址头</b>（存于 {@code data/.local} 第 6 行，如
+ * {@code https://ghproxy.net}、{@code gitee.com}）——仓库信息
  * （{@code RS6048/Schedule-On-Top/main}）在下载时由程序自动追加，
  * 无需在输入框填写完整 URL。镜像值一旦改变立即保存（无需保存按钮）；
  * 留空 = 默认 GitHub raw 直连。使用默认地址失败时自动依次尝试常见镜像前缀。</p>
@@ -46,10 +57,8 @@ public class UpdateChecker {
             "https://mirror.ghproxy.com/"
     };
 
-    private static final File VERSION_FILE = new File("./data/version.txt");
-
-    /** 当前程序版本（与推送的 version.json 一致）。 */
-    public static final String LOCAL_VERSION = "1.3.0";
+    /** 当前程序版本（硬编码于源码，与推送的 version.json 一致；不使用 version.txt）。 */
+    public static final String LOCAL_VERSION = "1.7.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
@@ -73,18 +82,14 @@ public class UpdateChecker {
     // ===== 镜像与版本 =====
 
     /**
-     * 当前镜像域名（.local 第 6 行；空 = 默认 GitHub raw 直连）。
+     * 当前镜像地址（.local 第 6 行；空 = 默认 GitHub raw 直连）。
      *
-     * <p>容错输入：自动剥离 {@code http(s)://} 协议前缀与尾部斜杠。</p>
+     * <p>保留用户填写的完整地址（含 {@code https://} 等协议头），仅去除尾部斜杠。</p>
      *
-     * @return 镜像域名（不含协议与路径，如 {@code raw.githubusercontent.com}）
+     * @return 镜像地址（可含协议头，如 {@code https://ghproxy.net}）
      */
     public static String mirrorDomain() {
         String d = Main.mirrorDomain == null ? "" : Main.mirrorDomain.trim();
-        int scheme = d.indexOf("://");
-        if (scheme >= 0) {
-            d = d.substring(scheme + 3);
-        }
         while (d.endsWith("/")) {
             d = d.substring(0, d.length() - 1);
         }
@@ -92,12 +97,16 @@ public class UpdateChecker {
     }
 
     /**
-     * 完整更新源 base：镜像域名 + 仓库信息（{@code RS6048/Schedule-On-Top/main}）自动追加。
+     * 完整更新源 base：镜像地址（保留其 {@code https://} 头，缺省时自动补）+ 仓库信息
+     * （{@code RS6048/Schedule-On-Top/main}）自动追加。
      *
      * @return 更新源 base URL（不含末尾斜杠）
      */
     public static String mirrorBase() {
-        return "https://" + mirrorDomain() + "/" + REPO_OWNER + "/" + REPO_NAME + "/main";
+        String domain = mirrorDomain();
+        String base = (domain.startsWith("http://") || domain.startsWith("https://"))
+                ? domain : "https://" + domain;
+        return base + "/" + REPO_OWNER + "/" + REPO_NAME + "/main";
     }
 
     /**
@@ -113,23 +122,12 @@ public class UpdateChecker {
     }
 
     /**
-     * 读取本地版本号；version.txt 不存在时自动创建并写入当前版本。
+     * 本地版本号（硬编码）：版本随源码编译进程序，不再依赖 version.txt 文件。
+     * 更新后源码中的 {@link #LOCAL_VERSION} 随之升级，重启即生效。
      *
-     * @return 本地版本号（如 "1.0.0"）
+     * @return 本地版本号（如 "1.7.0"）
      */
     public static String localVersion() {
-        try {
-            if (VERSION_FILE.exists()) {
-                String v = new String(Files.readAllBytes(VERSION_FILE.toPath()), StandardCharsets.UTF_8)
-                        .replace("\uFEFF", "").trim();
-                if (!v.isEmpty()) {
-                    return v;
-                }
-            }
-            Files.write(VERSION_FILE.toPath(), LOCAL_VERSION.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException ignored) {
-            // 无法读写时仍返回内置版本
-        }
         return LOCAL_VERSION;
     }
 
@@ -199,6 +197,11 @@ public class UpdateChecker {
     /**
      * 下载更新清单中的文件到本地对应路径（覆盖）。
      *
+     * <p>文件列表来自 {@link #checkUpdate()} 解析的<b>远端 version.json</b>（新版本
+     * 的文件列表），本地文件不参与列表生成。下载时对单条清单容错：若远端返回 404
+     * （该文件在新版本中已删除，属清单过期条目），跳过并继续，不中断整体更新；
+     * 其他网络错误仍视为失败抛出。</p>
+     *
      * @param info 更新信息（files 为相对仓库根的路径）
      * @throws IOException 下载或写入失败时抛出
      */
@@ -207,6 +210,7 @@ public class UpdateChecker {
             return;
         }
         String base = lastWorkingBase != null ? lastWorkingBase : mirrorBase();
+        List<String> skipped = new ArrayList<>();
         for (String path : info.files) {
             if (path == null || path.isEmpty() || path.startsWith("/") || path.contains("..")) {
                 throw new IOException("非法更新路径: " + path);
@@ -215,9 +219,24 @@ public class UpdateChecker {
             if (target.getParentFile() != null) {
                 target.getParentFile().mkdirs();
             }
-            String content = httpGet(base + "/" + path);
-            Files.write(target.toPath(), content.getBytes(StandardCharsets.UTF_8));
-            System.out.println("[update] 已下载: " + path);
+            String url = base + "/" + path;
+            try {
+                String content = httpGet(url);
+                Files.write(target.toPath(), content.getBytes(StandardCharsets.UTF_8));
+                System.out.println("[update] 已下载: " + path);
+            } catch (IOException e) {
+                // 404 = 清单中残留的旧文件在新版本中已删除 → 跳过该条，继续下载其余文件；
+                // 其余错误（网络中断/源不可达等）仍按失败处理，避免静默“成功”
+                if (e.getMessage() != null && e.getMessage().contains("HTTP 404")) {
+                    System.out.println("[update] 跳过（新版本已删除）: " + path);
+                    skipped.add(path);
+                } else {
+                    throw e;
+                }
+            }
+        }
+        if (!skipped.isEmpty()) {
+            System.out.println("[update] 清单过期条目已跳过: " + String.join(", ", skipped));
         }
     }
 
@@ -292,7 +311,7 @@ public class UpdateChecker {
 
     /**
      * 自动更新主流程（供后台线程调用）：检查 → 有新版则<b>弹窗由用户手动确认</b> →
-     * 确认后下载 → 重新编译 → 自动打包 jar → 更新本地版本。
+     * 确认后下载 → 重新编译 → 自动打包 jar → 提示重启生效（版本号硬编码于源码）。
      *
      * <p>即“自动检测，手动确认”：发现新版不会直接下载，先弹确认框；用户选“否”则放弃本次更新。</p>
      *
@@ -314,13 +333,25 @@ public class UpdateChecker {
         final int[] choice = new int[1];
         try {
             SwingUtilities.invokeAndWait(() -> {
+                // 更新内容放入滚动区域：固定宽度，长说明只在框内纵向滚动，不横向扩展对话框
                 StringBuilder msg = new StringBuilder();
                 msg.append("发现新版本 v").append(detectedVersion);
                 if (!detectedNote.isEmpty()) {
-                    msg.append("\n").append(detectedNote);
+                    msg.append("\n\n").append(detectedNote);
                 }
                 msg.append("\n\n是否现在下载更新？（更新完成后需重启程序生效）");
-                choice[0] = JOptionPane.showConfirmDialog(null, msg.toString(),
+                JTextArea ta = new JTextArea(msg.toString());
+                ta.setEditable(false);
+                ta.setOpaque(false);
+                ta.setLineWrap(true);
+                ta.setWrapStyleWord(true);
+                ta.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+                JScrollPane sp = new JScrollPane(ta);
+                sp.setPreferredSize(new Dimension(420, 260));
+                sp.setBorder(BorderFactory.createEmptyBorder());
+                JPanel panel = new JPanel(new BorderLayout());
+                panel.add(sp, BorderLayout.CENTER);
+                choice[0] = JOptionPane.showConfirmDialog(null, panel,
                         "发现更新", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
             });
         } catch (Exception e) {
@@ -341,7 +372,6 @@ public class UpdateChecker {
                     cleanupSources();
                 }
             }
-            Files.write(VERSION_FILE.toPath(), info.version.getBytes(StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             sb.append("已更新到 v").append(info.version).append("（").append(compile);
             if (jarMsg != null && !jarMsg.isEmpty()) {

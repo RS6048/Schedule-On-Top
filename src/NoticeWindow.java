@@ -58,6 +58,50 @@ public class NoticeWindow extends JWindow {
     /** 倒计时总帧数（用于进度条比例计算）。 */
     private final int totalTicks;
 
+    // ---- 主课条联动 ----
+    /** 正在显示（滑入中/可见中）且参与课表联动的通知数量。 */
+    private static int activeCount = 0;
+
+    /** 是否因通知显示而隐藏了主悬浮课条（仅当通知显示前课条可见时为 true）。 */
+    private static boolean mainHiddenByNotice = false;
+
+    /** 本实例是否已计入 activeCount（防止共享实例重复显示时重复计数）。 */
+    private boolean counted = false;
+
+    /** 是否不联动主课条（显示时不隐藏课表，关闭时不恢复）。 */
+    private boolean noMainLink = false;
+
+    /**
+     * 设置本通知<b>不联动</b>主悬浮课条（如"请前往系统托盘"警告：
+     * 显示时不隐藏课表，关闭后也不自动恢复课表）。
+     *
+     * @return 本实例（便于链式调用）
+     */
+    public NoticeWindow setNoMainLink() {
+        this.noMainLink = true;
+        return this;
+    }
+
+    /**
+     * 通知显示/关闭时同步主悬浮课条的显隐：有参与联动的通知正在显示时隐藏课条，
+     * 全部关闭后恢复（仅恢复因通知而隐藏的情况，用户主动隐藏不被覆盖）。
+     */
+    private static void syncMainWindow() {
+        if (Main.mw == null) {
+            return;
+        }
+        if (activeCount > 0) {
+            if (Main.mw.isVisible() && !mainHiddenByNotice) {
+                mainHiddenByNotice = true;
+                Main.mw.setVisible(false);
+            }
+        } else if (mainHiddenByNotice) {
+            mainHiddenByNotice = false;
+            Main.mw.setVisible(true);
+            FrameTray.setLabel();
+        }
+    }
+
     /** 文字滚动当前 X 偏移。 */
     private int scrollX;
 
@@ -159,9 +203,16 @@ public class NoticeWindow extends JWindow {
     }
 
     /**
-     * 触发关闭回调。
+     * 触发关闭回调，并（若本通知参与联动）从活跃计数中移除、恢复主课条。
      */
     private void fireCloseCallback() {
+        if (counted) {
+            counted = false;
+            if (!noMainLink) {
+                activeCount--;
+            }
+            syncMainWindow();
+        }
         if (closeCallback != null) {
             closeCallback.actionPerformed(new ActionEvent(this, 0, "closed"));
         }
@@ -190,6 +241,14 @@ public class NoticeWindow extends JWindow {
             remainingTicks = totalTicks;
             scrollX = needScroll() ? WIDTH : (WIDTH - getTextWidth()) / 2;
             super.setVisible(true);
+            // 计入活跃通知并同步主课条（仅首次显示；同一实例重复显示不重复计数）
+            if (!counted) {
+                counted = true;
+                if (!noMainLink) {
+                    activeCount++;
+                }
+                syncMainWindow();
+            }
             state = State.SLIDING_IN;
             animationTimer.start();
         } else {
@@ -246,39 +305,42 @@ public class NoticeWindow extends JWindow {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // 底部倒计时进度条（空内容时也必须绘制，作为唯一可见元素）
-        float progress = totalTicks > 0 ? (float) remainingTicks / totalTicks : 0;
-        if (Main.mw != null && Main.mw.theme != null) {
-            g2.setColor(Main.mw.theme);
-        } else {
-            g2.setColor(new Color(100, 180, 255));
-        }
-        g2.fillRect(0, getHeight() - PROGRESS_HEIGHT, (int) (WIDTH * progress), PROGRESS_HEIGHT);
-
-        // 空内容窗口仅显示进度条（倒计时指示器），直接返回
+        // 空内容窗口：仅绘制底部进度条（倒计时指示器），无背景
         if (detail.isEmpty()) {
+            drawProgressBar(g2);
             g2.dispose();
             return;
         }
 
-        // 半透明圆角背景
-        g2.setColor(new Color(30, 30, 30, 200));
-        g2.fillRoundRect(0, 0, WIDTH, HEIGHT, 8, 8);
-
-        // 顶部主题色装饰线
-        if (Main.mw != null && Main.mw.theme != null) {
-            g2.setColor(Main.mw.theme);
-            g2.fillRoundRect(0, 0, WIDTH, 2, 8, 8);
-        }
+        // 白底黑字（与主课表一致），无圆角
+        g2.setColor(Color.WHITE);
+        g2.fillRect(0, 0, WIDTH, HEIGHT);
 
         // 文本（裁剪到窗口范围内，支持滚动）
-        g2.setColor(Color.WHITE);
+        g2.setColor(Color.BLACK);
         g2.setFont(FONT);
         g2.setClip(4, 0, WIDTH - 8, HEIGHT - PROGRESS_HEIGHT);
         int textY = (HEIGHT - PROGRESS_HEIGHT) / 2 + g2.getFontMetrics().getAscent() / 2 - 2;
         g2.drawString(detail, scrollX, textY);
         g2.setClip(null);
 
+        // 进度条最后绘制：位于底部、z 顺序最上层，不被背景覆盖
+        drawProgressBar(g2);
+
         g2.dispose();
+    }
+
+    /**
+     * 绘制底部倒计时进度条（主题色，与主课表进度条一致）。
+     * 仅在窗口底部绘制、置于最上层，不参与圆角/背景层。
+     *
+     * @param g2 图形上下文
+     */
+    private void drawProgressBar(Graphics2D g2) {
+        float progress = totalTicks > 0 ? (float) remainingTicks / totalTicks : 0;
+        Color bar = (Main.mw != null && Main.mw.theme != null)
+                ? Main.mw.theme : new Color(100, 180, 255);
+        g2.setColor(bar);
+        g2.fillRect(0, getHeight() - PROGRESS_HEIGHT, (int) (WIDTH * progress), PROGRESS_HEIGHT);
     }
 }

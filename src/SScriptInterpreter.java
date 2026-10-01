@@ -11,6 +11,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -31,8 +32,8 @@ import javax.swing.SwingUtilities;
  *   <li>时间宏 {@code %date% %time% %day% ...}；</li>
  *   <li>课表操作：{@code getcourse/setcourse/replace}；</li>
  *   <li>显示块操作：{@code addblock/removeblock}（addblock 支持 {@code $var$} 内联变量）；</li>
- *   <li>系统操作：{@code cmd}（执行 Windows 命令）、{@code mouse/click/clickright}（控制鼠标）、
- *       {@code key/type}（控制键盘）。</li>
+ *   <li>系统操作：{@code cmd}（执行 Windows 命令）、{@code admcmd}（以管理员权限执行，弹 UAC）、
+ *       {@code mouse/click/clickright}（控制鼠标）、{@code key/type}（控制键盘）。</li>
  * </ul>
  *
  * <p>脚本文件放置于 {@code ./commands/} 目录，后缀 {@code .txt}。
@@ -56,6 +57,9 @@ import javax.swing.SwingUtilities;
  * # 打开记事本并输入文字
  * cmd notepad
  * type hello world
+ *
+ * # 以管理员权限执行命令（每次弹 UAC 确认）
+ * admcmd ipconfig /flushdns
  * }</pre>
  */
 public class SScriptInterpreter {
@@ -249,6 +253,7 @@ public class SScriptInterpreter {
             case "delblock":    handleDelBlock(parts); break;
             case "removeblock":handleRemoveBlock(parts); break;
             case "cmd":        handleCmd(parts); break;
+            case "admcmd":     handleAdmCmd(parts); break;
             case "mouse":      handleMouse(parts); break;
             case "click":      handleClick(parts, false); break;
             case "clickright": handleClick(parts, true); break;
@@ -503,7 +508,7 @@ public class SScriptInterpreter {
     /**
      * setcourse index name —— 设置第 index 个课表 token 的科目。
      *
-     * <p>index 从 0 开始，<b>课间（{@code |}）、空位（{@code \\}）、晚自习（{@code ~}）等
+     * <p>index 从 0 开始，<b>课间（{@code |}）、空位（{@code \}）、晚自习（{@code ~}）等
      * 全部 token 均计入位置</b>（与课表行 token 一一对应）。name 若为 full_name.txt 中的
      * 全称（如 {@code 语文}），自动反向解析为简称（{@code 语}）存储，使倒计时显示正确的
      * 完整名称，同时保持单个 token 参与课程定位。</p>
@@ -639,6 +644,59 @@ public class SScriptInterpreter {
             }).start();
         } catch (IOException e) {
             System.err.println("[SScript] cmd 执行失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * admcmd command —— 以管理员权限（UAC 提权）异步执行一条 cmd 命令。
+     *
+     * <p>与 {@code cmd} 的区别：本命令通过 {@code powershell Start-Process -Verb RunAs}
+     * 触发一次 UAC 确认，在新 cmd 窗口中<b>以管理员身份</b>执行。仅适用于确实需要
+     * 管理员权限的偶发命令（如修改 hosts、管理系统服务等）；<b>每次执行都会弹出 UAC</b>，
+     * 脚本侧不捕获该窗口的输出。参数中的变量与宏会先展开。</p>
+     *
+     * <p>实现细节：命令先写入临时 .bat（UTF-8 + chcp 65001 防中文乱码），bat 路径通过
+     * 环境变量 {@code SS_ADM_BAT} 传给 PowerShell，避免命令行转义与引号问题；执行完毕后
+     * 窗口停留（{@code pause}）便于查看输出。预览模式（dryRun）跳过。</p>
+     *
+     * <p>示例：{@code admcmd ipconfig /flushdns}、{@code admcmd net stop 某服务}。</p>
+     */
+    private void handleAdmCmd(String[] parts) {
+        if (ctx.dryRun) return; // 预览模式跳过系统命令
+        if (parts.length < 2) return;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i < parts.length; i++) {
+            sb.append(inlineResolve(parts[i])).append(" ");
+        }
+        String command = sb.toString().trim();
+        if (command.isEmpty()) return;
+        try {
+            // 写入临时 .bat：UTF-8 + 切换到 65001 代码页，保证中文参数不乱码；
+            // 命令结束后 pause 使窗口停留，便于查看输出
+            File bat = File.createTempFile("sscm_adm_", ".bat");
+            bat.deleteOnExit();
+            Files.writeString(bat.toPath(),
+                    "@echo off\r\nchcp 65001 >nul\r\n" + command + "\r\npause\r\n",
+                    StandardCharsets.UTF_8);
+            // 以管理员身份运行：弹 UAC；bat 路径经环境变量传递，规避引号/特殊字符转义
+            ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                    "-Command", "Start-Process -FilePath $env:SS_ADM_BAT -Verb RunAs");
+            pb.environment().put("SS_ADM_BAT", bat.getAbsolutePath());
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            // 异步读取输出（powershell 自身输出基本为空），避免阻塞脚本执行
+            new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(
+                        new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        System.out.println("[sscm-admcmd] " + line);
+                    }
+                } catch (IOException ignored) {
+                }
+            }).start();
+        } catch (IOException e) {
+            System.err.println("[SScript] admcmd 执行失败: " + e.getMessage());
         }
     }
 
@@ -1072,12 +1130,12 @@ public class SScriptInterpreter {
             return String.valueOf(ctx.weekTurn);
         }
         if ("course".equals(name)) {
-            // 当前时段对应的课表 token 本身（含 | \ ~ 等）；仅隐藏字符（full_name.txt
-            // 中 $---$ 分割线上方）返回 null，时段外返回空串
+            // 当前时段的课程完整名称（full_name.txt 映射，如 语→语文、|→恰饭）；
+            // 仅隐藏字符（full_name.txt 中 $---$ 分割线上方）返回 null，时段外返回空串
             return currentCourse();
         }
         if ("nextcourse".equals(name)) {
-            // 下一时段的课表 token 本身（课间→下一节，上课中→下课后下一节）；
+            // 下一时段课程的完整名称（课间→下一节，上课中→下课后下一节）；
             // 仅隐藏字符返回 null，无后续时段返回空串
             return nextCourse();
         }
@@ -1090,14 +1148,16 @@ public class SScriptInterpreter {
     }
 
     /**
-     * 计算当前时间对应的课表 token。
+     * 计算当前时间对应的课程完整名称。
      *
      * <p>按 {@link Context#times}（HH:mm 成对）匹配当前时间所在时段，返回
-     * {@link Context#courses} 对应位置的 token<b>本身</b>（包括 {@code |} 恰饭、
-     * {@code \\} 无课、{@code ~} 晚自习等）；仅当该 token 为隐藏字符
-     * （full_name.txt 中 {@code $---$} 分割线上方）时返回 null；时段外返回空串。</p>
+     * {@link Context#courses} 对应位置课程 token 的<b>完整名称</b>
+     * （full_name.txt 映射，如 {@code 语} → {@code 语文}；{@code |} → 恰饭、
+     * {@code \} → 无映射时保持 {@code \}、{@code ~} → 晚自习等）；仅当该 token
+     * 为隐藏字符（full_name.txt 中 {@code $---$} 分割线上方）时返回 null；
+     * 时段外返回空串。</p>
      *
-     * @return 当前时段 token；时段外返回 ""；隐藏字符返回 null
+     * @return 当前时段课程全称；时段外返回 ""；隐藏字符返回 null
      */
     private String currentCourse() {
         if (ctx.courses == null || ctx.courses.isEmpty()
@@ -1120,7 +1180,8 @@ public class SScriptInterpreter {
                     if (isHiddenCourse(c)) {
                         return null;
                     }
-                    return c;
+                    // 返回完整名称（full_name.txt 映射；无映射时保持 token 本身）
+                    return Main.tokenToFullName(c);
                 }
                 return "";
             }
@@ -1129,14 +1190,14 @@ public class SScriptInterpreter {
     }
 
     /**
-     * 计算下一时段的课表 token。
+     * 计算下一时段的课程完整名称。
      *
-     * <p>以当前偏移时间为基准：处于课间时返回下一时段的 token；正在上课时返回
-     * 下课后（下一时段）的 token。与 {@link #currentCourse()} 一致，返回 token
-     * <b>本身</b>（含 {@code |}、{@code \\}、{@code ~} 等）；仅隐藏字符返回 null；
-     * 无后续时段返回空串。</p>
+     * <p>以当前偏移时间为基准：处于课间时返回下一时段的课程；正在上课时返回
+     * 下课后（下一时段）的课程。与 {@link #currentCourse()} 一致，返回<b>完整名称</b>
+     * （full_name.txt 映射，{@code |}、{@code ~} 等同样映射为全称）；仅隐藏字符
+     * 返回 null；无后续时段返回空串。</p>
      *
-     * @return 下一时段 token；无后续时段返回 ""；隐藏字符返回 null
+     * @return 下一时段课程全称；无后续时段返回 ""；隐藏字符返回 null
      */
     private String nextCourse() {
         if (ctx.courses == null || ctx.courses.isEmpty()
@@ -1164,7 +1225,8 @@ public class SScriptInterpreter {
         if (isHiddenCourse(c)) {
             return null;
         }
-        return c;
+        // 返回完整名称（full_name.txt 映射；无映射时保持 token 本身）
+        return Main.tokenToFullName(c);
     }
 
     /** 判断课程简称是否为隐藏字符（full_name.txt 中 {@code $---$} 分割线上方的键）。 */
@@ -1269,5 +1331,98 @@ public class SScriptInterpreter {
             case 7: return "周日";
             default: return "";
         }
+    }
+
+    // ==================================================================
+    // 加载校验（类 Minecraft 数据包 mcfunction 机制）
+    // ==================================================================
+
+    /** 全部已知命令（小写，与 {@link #executeLine(String)} 的 switch 保持一致）。 */
+    private static final Set<String> KNOWN_COMMANDS = Set.of(
+            "set", "add", "sub", "mul", "div", "mod",
+            "if", "else", "endif", "while", "endwhile",
+            "func", "endfunc", "call", "return",
+            "getcourse", "setcourse", "replace",
+            "addblock", "delblock", "removeblock",
+            "cmd", "admcmd", "mouse", "click", "clickright",
+            "key", "type", "delay", "run",
+            "splashscreen", "shownotify", "popcircle",
+            "print", "exit");
+
+    /**
+     * 静态校验一段脚本（加载时一次性解析，mcfunction 式）：脚本中存在<b>任何</b>
+     * 错误语句（未知命令、或 if/else/endif、while/endwhile、func/endfunc 结构不闭合）
+     * 即判定整个脚本无效。调用方应遵循“整个文件不记录”：校验失败时整体丢弃、
+     * 不执行任何一行（而不是逐行执行到错误处才报错）。
+     *
+     * <p>规则：</p>
+     * <ul>
+     *   <li>空行与 {@code #} 注释跳过；</li>
+     *   <li>行首 token 以 {@code $} 开头的动态命令（运行时经内联变量展开，如
+     *       {@code $action$ arg}）无法静态判定，不视为错误；</li>
+     *   <li>{@code else} 必须处于 {@code if} 块内，否则错误；</li>
+     *   <li>结构关键字配对不闭合（缺 {@code endif}/{@code endwhile}/{@code endfunc}，
+     *       或多余的结束关键字）即错误。</li>
+     * </ul>
+     *
+     * @param lines 脚本行
+     * @return true = 脚本有效；false = 含错误语句（整个文件不记录）
+     */
+    public static boolean validate(List<String> lines) {
+        if (lines == null) {
+            return false;
+        }
+        Deque<String> stack = new ArrayDeque<>();
+        for (String raw : lines) {
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            // 动态命令：第一 token 为 $变量（运行时展开为命令名），无法静态验证，放行
+            if (line.charAt(0) == '$') {
+                continue;
+            }
+            String cmd = line.split("\\s+")[0].toLowerCase(Locale.ROOT);
+            switch (cmd) {
+                case "if":     stack.push("if");     break;
+                case "while":  stack.push("while");  break;
+                case "func":   stack.push("func");   break;
+                case "else":
+                    // else 必须直接处于 if 块内
+                    if (stack.isEmpty() || !"if".equals(stack.peek())) {
+                        System.err.println("[脚本] 加载校验失败：else 不在 if 块内");
+                        return false;
+                    }
+                    break;
+                case "endif":
+                    if (stack.isEmpty() || !"if".equals(stack.pop())) {
+                        System.err.println("[脚本] 加载校验失败：endif 无匹配的 if");
+                        return false;
+                    }
+                    break;
+                case "endwhile":
+                    if (stack.isEmpty() || !"while".equals(stack.pop())) {
+                        System.err.println("[脚本] 加载校验失败：endwhile 无匹配的 while");
+                        return false;
+                    }
+                    break;
+                case "endfunc":
+                    if (stack.isEmpty() || !"func".equals(stack.pop())) {
+                        System.err.println("[脚本] 加载校验失败：endfunc 无匹配的 func");
+                        return false;
+                    }
+                    break;
+                default:
+                    if (!KNOWN_COMMANDS.contains(cmd)) {
+                        System.err.println("[脚本] 加载校验失败：未知命令 \"" + cmd + "\"");
+                        return false;
+                    }
+            }
+        }
+        if (!stack.isEmpty()) {
+            System.err.println("[脚本] 加载校验失败：结构未闭合（缺少 " + stack.peek() + " 的结束关键字）");
+            return false;
+        }
+        return true;
     }
 }
