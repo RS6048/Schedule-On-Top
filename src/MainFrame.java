@@ -743,7 +743,7 @@ public class MainFrame extends JFrame implements ActionListener {
      * 显示文件原始内容，不应用换课与脚本。</p>
      *
      * @param date         目标日期
-     * @param weekTurn     当前周次（单双周课程解析与周六行轮转用）
+     * @param weekTurn     当前周次（单双周解析与周六行轮转用）
      * @param applyPreview 是否应用脚本换课预览（仅课表模式为 true）
      * @return 该天的课程单元格列表
      * @throws Exception 读取课表文件失败时抛出
@@ -1098,6 +1098,7 @@ public class MainFrame extends JFrame implements ActionListener {
             Main.outputException(e);
             return;
         }
+
         // 清除选择并刷新
         if (swap[0] != null) swap[0].setSelected(false);
         if (swap[1] != null) swap[1].setSelected(false);
