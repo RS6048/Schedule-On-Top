@@ -21,21 +21,24 @@ import javax.swing.SwingUtilities;
  * 并尝试用 javac 重新编译到 {@code out/production/ScrollSched}（IDEA 输出布局）。
  * 更新后需重启程序生效。</p>
  *
- * <p>镜像配置：项目根 {@code data/mirror.txt} 存放 raw 根地址（UTF-8 单行）——
- * 为空时使用默认 GitHub raw；可填 gitee raw 根（如
- * {@code https://gitee.com/xxx/ScrollSched/raw/main}）或代理前缀拼接默认地址
- * （如 {@code https://ghproxy.net/https://raw.githubusercontent.com/xxx/ScrollSched/main}）。
- * 使用默认地址失败时自动依次尝试常见镜像前缀。</p>
+ * <p>镜像配置：镜像<b>只写域名</b>（存于 {@code data/.local} 第 6 行，如
+ * {@code ghproxy.net}、{@code gitee.com}）——仓库信息
+ * （{@code RS6048/Schedule-On-Top/main}）在下载时由程序自动追加，
+ * 无需在输入框填写完整 URL。镜像值一旦改变立即保存（无需保存按钮）；
+ * 留空 = 默认 GitHub raw 直连。使用默认地址失败时自动依次尝试常见镜像前缀。</p>
  */
 public class UpdateChecker {
 
-    /** 仓库所有者与仓库名（用于默认更新源）。 */
+    /** 仓库所有者与仓库名（用于默认更新源与自动追加仓库路径）。 */
     public static final String REPO_OWNER = "RS6048";
     public static final String REPO_NAME = "Schedule-On-Top";
 
+    /** 默认镜像域名（GitHub raw）。 */
+    public static final String DEFAULT_DOMAIN = "raw.githubusercontent.com";
+
     /** 默认 raw 根（main 分支）。 */
     public static final String DEFAULT_BASE =
-            "https://raw.githubusercontent.com/" + REPO_OWNER + "/" + REPO_NAME + "/main";
+            "https://" + DEFAULT_DOMAIN + "/" + REPO_OWNER + "/" + REPO_NAME + "/main";
 
     /** 直连失败时自动尝试的镜像前缀（拼接完整 URL，按序尝试）。 */
     private static final String[] FALLBACK_PREFIXES = {
@@ -43,11 +46,10 @@ public class UpdateChecker {
             "https://mirror.ghproxy.com/"
     };
 
-    private static final File MIRROR_FILE = new File("./data/mirror.txt");
     private static final File VERSION_FILE = new File("./data/version.txt");
 
     /** 当前程序版本（与推送的 version.json 一致）。 */
-    public static final String LOCAL_VERSION = "1.2.0";
+    public static final String LOCAL_VERSION = "1.3.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
@@ -71,34 +73,43 @@ public class UpdateChecker {
     // ===== 镜像与版本 =====
 
     /**
-     * 读取镜像 raw 根；mirror.txt 不存在/为空/等于默认值时返回默认直连地址。
+     * 当前镜像域名（.local 第 6 行；空 = 默认 GitHub raw 直连）。
+     *
+     * <p>容错输入：自动剥离 {@code http(s)://} 协议前缀与尾部斜杠。</p>
+     *
+     * @return 镜像域名（不含协议与路径，如 {@code raw.githubusercontent.com}）
+     */
+    public static String mirrorDomain() {
+        String d = Main.mirrorDomain == null ? "" : Main.mirrorDomain.trim();
+        int scheme = d.indexOf("://");
+        if (scheme >= 0) {
+            d = d.substring(scheme + 3);
+        }
+        while (d.endsWith("/")) {
+            d = d.substring(0, d.length() - 1);
+        }
+        return d.isEmpty() ? DEFAULT_DOMAIN : d;
+    }
+
+    /**
+     * 完整更新源 base：镜像域名 + 仓库信息（{@code RS6048/Schedule-On-Top/main}）自动追加。
      *
      * @return 更新源 base URL（不含末尾斜杠）
      */
     public static String mirrorBase() {
-        String cfg = readTrimmed(MIRROR_FILE);
-        if (cfg == null || cfg.isEmpty() || cfg.equals(DEFAULT_BASE)) {
-            return DEFAULT_BASE;
-        }
-        while (cfg.endsWith("/")) {
-            cfg = cfg.substring(0, cfg.length() - 1);
-        }
-        return cfg;
+        return "https://" + mirrorDomain() + "/" + REPO_OWNER + "/" + REPO_NAME + "/main";
     }
 
     /**
-     * 保存镜像 raw 根到 mirror.txt。空串或默认值会清空文件（恢复直连）。
+     * 保存镜像域名到 {@code data/.local}（空串恢复默认直连）。镜像值一旦改变即调用，
+     * 无需额外保存按钮。
      *
-     * @param base 用户填写的 base URL
-     * @throws IOException 写入失败时抛出
+     * @param domain 用户填写的镜像域名
+     * @throws IOException 写入 .local 失败时抛出
      */
-    public static void saveMirror(String base) throws IOException {
-        String v = base == null ? "" : base.trim();
-        if (v.isEmpty() || v.equals(DEFAULT_BASE)) {
-            Files.write(MIRROR_FILE.toPath(), new byte[0]);
-        } else {
-            Files.write(MIRROR_FILE.toPath(), v.getBytes(StandardCharsets.UTF_8));
-        }
+    public static void saveMirror(String domain) throws IOException {
+        Main.mirrorDomain = domain == null ? "" : domain.trim();
+        Main.saveLocals();
     }
 
     /**
@@ -164,7 +175,8 @@ public class UpdateChecker {
         String base = mirrorBase();
         List<String> candidates = new ArrayList<>();
         candidates.add(base);
-        if (base.equals(DEFAULT_BASE)) {
+        // 仅未自定义镜像（默认直连）失败时自动尝试常见加速前缀
+        if (Main.mirrorDomain == null || Main.mirrorDomain.trim().isEmpty()) {
             for (String prefix : FALLBACK_PREFIXES) {
                 candidates.add(prefix + DEFAULT_BASE);
             }
@@ -450,18 +462,6 @@ public class UpdateChecker {
     }
 
     // ===== 工具 =====
-
-    private static String readTrimmed(File f) {
-        try {
-            if (f.exists()) {
-                return new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8)
-                        .replace("\uFEFF", "").trim();
-            }
-        } catch (IOException ignored) {
-            // 读取失败按未配置处理
-        }
-        return null;
-    }
 
     private static String httpGet(String urlStr) throws IOException {
         HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
