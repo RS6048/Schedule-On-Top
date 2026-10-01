@@ -49,7 +49,7 @@ public class UpdateChecker {
     private static final File VERSION_FILE = new File("./data/version.txt");
 
     /** 当前程序版本（与推送的 version.json 一致）。 */
-    public static final String LOCAL_VERSION = "1.3.0";
+    public static final String LOCAL_VERSION = "1.4.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
