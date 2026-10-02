@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.List;
 
@@ -103,7 +104,7 @@ public class Main {
     /** 时间偏移（秒）："我的时间慢了x秒"，课表时间判断与 $time$ 宏同步偏移。 */
     static volatile int timeOffsetSeconds = 0;
 
-    /** 更新镜像域名（.local 第 6 行保存；空 = 默认 GitHub raw 直连）。 */
+    /** 更新镜像地址（.local 第 6 行保存，可含 https:// 头；空 = 默认 GitHub raw 直连）。 */
     public static volatile String mirrorDomain = "";
 
     /** tick 脚本是否正在执行（防重入）。 */
@@ -237,6 +238,11 @@ public class Main {
      * @throws Exception 初始化失败时抛出
      */
     public static void init() throws Exception {
+        // 确保 data 目录存在（首次运行时自动创建，避免后续读写 .local 等失败）
+        File dataDir = new File("./data");
+        if (!dataDir.exists()) {
+            dataDir.mkdirs();
+        }
         System.out.println("Preparing for initialize...");
         getLocals();
         ensureConfigFiles();
@@ -265,15 +271,22 @@ public class Main {
                     # 在这里显式调用其他命令文件（不调用即忽略）。
                     """);
         }
-        // tick.txt：每次更新循环（1s）自动执行（不存在则自动创建，包含教师节祝福等持续判断）
+        // tick.txt：每次更新循环（1s）自动执行（不存在则自动创建，仅作调度入口）
         File tick = new File(commandsDir, "tick.txt");
         if (!tick.exists()) {
             writeFile(tick, """
                     # tick.txt —— 每次更新循环（1s）自动执行
                     # 基于 reload 基准上下文拷贝执行，addblock 不跨 tick 累积
-
-                    # === 教师节祝福（9月10日）===
-                    # 上课时根据当前科目显示对应老师的姓；非上课（$course$ 为空）不显示
+                    # 教师节祝福逻辑在 teachersDay.txt（通过 run 显式调用，仅 9月10日 生效）
+                    run teachersDay.txt
+                    """);
+        }
+        // teachersDay.txt：教师节祝福脚本（不存在则自动创建；由 tick.txt 每 1s 调用）
+        File teachersDay = new File(commandsDir, "teachersDay.txt");
+        if (!teachersDay.exists()) {
+            writeFile(teachersDay, """
+                    # teachersDay.txt —— 教师节祝福（9月10日）
+                    # 由 tick.txt 通过 run teachersDay.txt 调用；上课时按当前科目显示对应老师姓氏
                     # 预设初始均为空字符，按需在 set $surname 后填写老师姓氏
                     if %month% == 9
                       if %dayofmonth% == 10
@@ -338,9 +351,9 @@ public class Main {
             writeFile(sstudy,
                     """
                             17:00 18:00
-                            一 信 数 信 数 \\
-                            二 数 英 物 化 \\
-                            三 信 语 信 数 \\
+                            一 信 数 信 数 \
+                            二 数 英 物 化 \
+                            三 信 语 信 数 \
                             """);
         }
         // night_study.txt：晚自习时间段（成对 HH:mm）。仅当本地开启晚自习且为周一~周五时生效
@@ -573,6 +586,10 @@ public class Main {
 
             updateWeekTurn();
 
+            // 自动清理过时的延迟课表文件（文件名日期前缀早于今天），
+            // 避免 delay 目录只增不减；仅在 reload() 时执行，tick 不清理
+            cleanOldDelayFiles();
+
             // 加载基础课表（从文件 + 换课应用）
             int weekTurn = getLocal("WeekTurn", 1);
             String baseSchedule = getSchedule(today, true, weekTurn);
@@ -799,9 +816,11 @@ public class Main {
     }
 
     /**
-     * 延迟课表数据：包含时间段、课表内容与可选的值日生覆盖。
+     * 延迟课表数据：包含时间段、课表内容、可选的值日生覆盖，以及当天生效的
+     * load / tick 脚本块（格式见 {@link #loadDelaySchedule}）。
      */
-    private record DelayData(String[] times, String schedule, String duty) {
+    private record DelayData(String[] times, String schedule, String duty,
+                             List<String> loadScript, List<String> tickScript) {
     }
 
     /**
@@ -855,7 +874,18 @@ public class Main {
      *   <li>时间段（空格分隔的 HH:mm 成对）</li>
      *   <li>课表内容 : 值日生（冒号分隔，两侧各自 trim）</li>
      * </ol>
-     * <p>自动快照文件（{@code _auto.txt} / 含 {@code AUTO} 行）不参与覆盖。</p>
+     * <p>课表行之后可附带<b>当天生效</b>的脚本块（可写 SScript 代码，或在其中
+     * {@code run 文件名} 引用 commands 目录下的文件）：</p>
+     * <pre>
+     * --- load ---
+     * 命令1
+     * 命令2
+     * --- tick ---
+     * 命令1
+     * </pre>
+     * <p>load 块在每次 reload() 时与 load.txt 一起执行；tick 块在每次更新循环（1s）
+     * 时与 tick.txt 一起执行。自动快照文件（{@code _auto.txt} / 含 {@code AUTO} 行）
+     * 不参与覆盖，也不含脚本块。</p>
      *
      * @param date 目标日期
      * @return 延迟课表数据；无匹配时返回 null
@@ -866,20 +896,50 @@ public class Main {
         if (f == null) {
             return null;
         }
+        List<String> lines = new ArrayList<>();
         try (BufferedReader br = new BufferedReader(
                 new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
-            String timesLine = br.readLine();
-            String scheduleLine = br.readLine();
-            if (scheduleLine == null || scheduleLine.trim().isEmpty()) {
-                return null;
+            String line;
+            while ((line = br.readLine()) != null) {
+                lines.add(line);
             }
-            String[] parts = scheduleLine.split(":", 2);
-            String schedule = parts[0].trim();
-            String duty = parts.length > 1 ? parts[1].trim() : "";
-            String[] timesArr = (timesLine != null && !timesLine.trim().isEmpty())
-                    ? timesLine.trim().split("\\s+") : new String[0];
-            return new DelayData(timesArr, schedule, duty);
         }
+        if (lines.size() < 2) {
+            return null;
+        }
+        String timesLine = lines.get(0);
+        String scheduleLine = lines.get(1);
+        if (scheduleLine == null || scheduleLine.trim().isEmpty()) {
+            return null;
+        }
+        String[] parts = scheduleLine.split(":", 2);
+        String schedule = parts[0].trim();
+        String duty = parts.length > 1 ? parts[1].trim() : "";
+        String[] timesArr = (timesLine != null && !timesLine.trim().isEmpty())
+                ? timesLine.trim().split("\\s+") : new String[0];
+        // 解析课表行之后的脚本块：--- load --- / --- tick ---
+        List<String> loadScript = new ArrayList<>();
+        List<String> tickScript = new ArrayList<>();
+        String block = null;
+        for (int i = 2; i < lines.size(); i++) {
+            String t = lines.get(i).trim();
+            if (t.equals("--- load ---")) {
+                block = "load";
+                continue;
+            }
+            if (t.equals("--- tick ---")) {
+                block = "tick";
+                continue;
+            }
+            if (t.startsWith("---") && t.endsWith("---")) {
+                block = null; // 其他块标记/块结束
+                continue;
+            }
+            if (block != null && !t.isEmpty()) {
+                (block.equals("load") ? loadScript : tickScript).add(lines.get(i));
+            }
+        }
+        return new DelayData(timesArr, schedule, duty, loadScript, tickScript);
     }
 
     /**
@@ -989,20 +1049,68 @@ public class Main {
     }
 
     /**
-     * 执行 ./data/commands/load.txt（每次 {@link #reload()} 时加载）。
+     * 自动删除过时的延迟课表文件：文件名日期前缀（{@code YYYY-MM-DD}）早于今天
+     * 的一律删除（含手动文件与自动快照），只保留今天的文件。
+     * 文件名前缀非 ISO 日期的文件不动（无法判定则不删）。
+     */
+    private static void cleanOldDelayFiles() {
+        if (!delayDir.exists() || !delayDir.isDirectory()) {
+            return;
+        }
+        LocalDate todayDate = LocalDate.now();
+        File[] files = delayDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".txt"));
+        if (files == null) {
+            return;
+        }
+        for (File f : files) {
+            String name = f.getName();
+            if (name.length() < 10) {
+                continue;
+            }
+            try {
+                LocalDate d = LocalDate.parse(name.substring(0, 10));
+                if (d.isBefore(todayDate)) {
+                    if (f.delete()) {
+                        System.out.println("[delay] 已删除过时延迟课表: " + name);
+                    } else {
+                        System.err.println("[delay] 删除失败: " + name);
+                    }
+                }
+            } catch (DateTimeParseException ignored) {
+                // 文件名前缀不是 ISO 日期 → 不判定，保留
+            }
+        }
+    }
+
+    /**
+     * 执行 ./data/commands/load.txt（每次 {@link #reload()} 时加载），并追加
+     * 当天手动延迟课表中的 {@code --- load ---} 脚本块（仅当天生效）。
      *
      * <p>其余命令文件<b>不会自动执行</b>，需在脚本中用 {@code run <文件名>}
-     * 命令显式调用；tick.txt 由 {@link #executeTickScript()} 在每次更新循环中执行。</p>
+     * 命令显式调用（delay 的 load/tick 块中同样可用）；tick.txt 与当天
+     * {@code --- tick ---} 块由 {@link #executeTickScript()} 在每次更新循环中执行。</p>
      *
      * @param ctx 脚本执行上下文（含课程列表、显示块、日期时间等）
      * @throws IOException 读取脚本失败时抛出
      */
     private static void executeLoadScript(SScriptInterpreter.Context ctx) throws IOException {
+        List<String> script = new ArrayList<>();
         File load = new File(commandsDir, "load.txt");
-        if (!load.exists() || !load.isFile()) {
-            return;
+        if (load.exists() && load.isFile()) {
+            script.addAll(readScriptLines(load));
         }
-        new SScriptInterpreter().execute(readScriptLines(load), ctx);
+        // 当天手动延迟课表的 load 块（仅当天生效；自动快照不参与）
+        try {
+            DelayData delay = loadDelaySchedule(LocalDate.now());
+            if (delay != null && delay.loadScript != null && !delay.loadScript.isEmpty()) {
+                script.addAll(delay.loadScript);
+            }
+        } catch (IOException e) {
+            System.err.println("[delay] 读取 load 块失败: " + e.getMessage());
+        }
+        if (!script.isEmpty()) {
+            new SScriptInterpreter().execute(script, ctx);
+        }
     }
 
     /**
@@ -1037,7 +1145,8 @@ public class Main {
     }
 
     /**
-     * 执行 ./data/commands/tick.txt（每次更新循环加载）。
+     * 执行 ./data/commands/tick.txt（每次更新循环加载），并追加当天手动延迟课表中的
+     * {@code --- tick ---} 脚本块（仅当天生效）。
      *
      * <p>基于 reload 的基础上下文拷贝独立执行（每次从基准状态开始，
      * addblock 等结果仅作用于当次显示、不会跨 tick 累积），
@@ -1047,19 +1156,36 @@ public class Main {
         if (tickRunning) {
             return;
         }
-        File tickFile = new File(commandsDir, "tick.txt");
-        if (!tickFile.exists() || !tickFile.isFile()) {
-            return;
-        }
         SScriptInterpreter.Context base = lastCtx;
         if (base == null) {
+            return;
+        }
+        // 汇总 tick.txt 与当天手动延迟课表的 tick 块；两者都不存在时本次无事可做
+        List<String> script = new ArrayList<>();
+        File tickFile = new File(commandsDir, "tick.txt");
+        if (tickFile.exists() && tickFile.isFile()) {
+            try {
+                script.addAll(readScriptLines(tickFile));
+            } catch (IOException e) {
+                System.err.println("[脚本] 读取 tick.txt 失败: " + e.getMessage());
+            }
+        }
+        try {
+            DelayData delay = loadDelaySchedule(LocalDate.now());
+            if (delay != null && delay.tickScript != null && !delay.tickScript.isEmpty()) {
+                script.addAll(delay.tickScript);
+            }
+        } catch (IOException e) {
+            System.err.println("[delay] 读取 tick 块失败: " + e.getMessage());
+        }
+        if (script.isEmpty()) {
             return;
         }
         tickRunning = true;
         Thread t = new Thread(() -> {
             try {
                 SScriptInterpreter.Context tickCtx = base.copy();
-                new SScriptInterpreter().execute(readScriptLines(tickFile), tickCtx);
+                new SScriptInterpreter().execute(script, tickCtx);
                 SwingUtilities.invokeLater(() -> {
                     if (mw != null) {
                         mw.setTextContent(tickCtx.blocks.toArray(new String[0]));
