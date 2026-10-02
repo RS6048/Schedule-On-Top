@@ -1,3 +1,6 @@
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.Font;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -10,7 +13,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.BorderFactory;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 
 /**
@@ -21,8 +28,8 @@ import javax.swing.SwingUtilities;
  * 并尝试用 javac 重新编译到 {@code out/production/ScrollSched}（IDEA 输出布局）。
  * 更新后需重启程序生效。</p>
  *
- * <p>镜像配置：镜像<b>只写域名</b>（存于 {@code data/.local} 第 6 行，如
- * {@code ghproxy.net}、{@code gitee.com}）——仓库信息
+ * <p>镜像配置：镜像<b>保留完整地址头</b>（存于 {@code data/.local} 第 6 行，如
+ * {@code https://ghproxy.net}、{@code gitee.com}）——仓库信息
  * （{@code RS6048/Schedule-On-Top/main}）在下载时由程序自动追加，
  * 无需在输入框填写完整 URL。镜像值一旦改变立即保存（无需保存按钮）；
  * 留空 = 默认 GitHub raw 直连。使用默认地址失败时自动依次尝试常见镜像前缀。</p>
@@ -73,18 +80,14 @@ public class UpdateChecker {
     // ===== 镜像与版本 =====
 
     /**
-     * 当前镜像域名（.local 第 6 行；空 = 默认 GitHub raw 直连）。
+     * 当前镜像地址（.local 第 6 行；空 = 默认 GitHub raw 直连）。
      *
-     * <p>容错输入：自动剥离 {@code http(s)://} 协议前缀与尾部斜杠。</p>
+     * <p>保留用户填写的完整地址（含 {@code https://} 等协议头），仅去除尾部斜杠。</p>
      *
-     * @return 镜像域名（不含协议与路径，如 {@code raw.githubusercontent.com}）
+     * @return 镜像地址（可含协议头，如 {@code https://ghproxy.net}）
      */
     public static String mirrorDomain() {
         String d = Main.mirrorDomain == null ? "" : Main.mirrorDomain.trim();
-        int scheme = d.indexOf("://");
-        if (scheme >= 0) {
-            d = d.substring(scheme + 3);
-        }
         while (d.endsWith("/")) {
             d = d.substring(0, d.length() - 1);
         }
@@ -92,12 +95,16 @@ public class UpdateChecker {
     }
 
     /**
-     * 完整更新源 base：镜像域名 + 仓库信息（{@code RS6048/Schedule-On-Top/main}）自动追加。
+     * 完整更新源 base：镜像地址（保留其 {@code https://} 头，缺省时自动补）+ 仓库信息
+     * （{@code RS6048/Schedule-On-Top/main}）自动追加。
      *
      * @return 更新源 base URL（不含末尾斜杠）
      */
     public static String mirrorBase() {
-        return "https://" + mirrorDomain() + "/" + REPO_OWNER + "/" + REPO_NAME + "/main";
+        String domain = mirrorDomain();
+        String base = (domain.startsWith("http://") || domain.startsWith("https://"))
+                ? domain : "https://" + domain;
+        return base + "/" + REPO_OWNER + "/" + REPO_NAME + "/main";
     }
 
     /**
@@ -314,13 +321,25 @@ public class UpdateChecker {
         final int[] choice = new int[1];
         try {
             SwingUtilities.invokeAndWait(() -> {
+                // 更新内容放入滚动区域：固定宽度，长说明只在框内纵向滚动，不横向扩展对话框
                 StringBuilder msg = new StringBuilder();
                 msg.append("发现新版本 v").append(detectedVersion);
                 if (!detectedNote.isEmpty()) {
-                    msg.append("\n").append(detectedNote);
+                    msg.append("\n\n").append(detectedNote);
                 }
                 msg.append("\n\n是否现在下载更新？（更新完成后需重启程序生效）");
-                choice[0] = JOptionPane.showConfirmDialog(null, msg.toString(),
+                JTextArea ta = new JTextArea(msg.toString());
+                ta.setEditable(false);
+                ta.setOpaque(false);
+                ta.setLineWrap(true);
+                ta.setWrapStyleWord(true);
+                ta.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+                JScrollPane sp = new JScrollPane(ta);
+                sp.setPreferredSize(new Dimension(420, 260));
+                sp.setBorder(BorderFactory.createEmptyBorder());
+                JPanel panel = new JPanel(new BorderLayout());
+                panel.add(sp, BorderLayout.CENTER);
+                choice[0] = JOptionPane.showConfirmDialog(null, panel,
                         "发现更新", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
             });
         } catch (Exception e) {
