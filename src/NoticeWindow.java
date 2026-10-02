@@ -58,6 +58,50 @@ public class NoticeWindow extends JWindow {
     /** 倒计时总帧数（用于进度条比例计算）。 */
     private final int totalTicks;
 
+    // ---- 主课条联动 ----
+    /** 正在显示（滑入中/可见中）且参与课表联动的通知数量。 */
+    private static int activeCount = 0;
+
+    /** 是否因通知显示而隐藏了主悬浮课条（仅当通知显示前课条可见时为 true）。 */
+    private static boolean mainHiddenByNotice = false;
+
+    /** 本实例是否已计入 activeCount（防止共享实例重复显示时重复计数）。 */
+    private boolean counted = false;
+
+    /** 是否不联动主课条（显示时不隐藏课表，关闭时不恢复）。 */
+    private boolean noMainLink = false;
+
+    /**
+     * 设置本通知<b>不联动</b>主悬浮课条（如"请前往系统托盘"警告：
+     * 显示时不隐藏课表，关闭后也不自动恢复课表）。
+     *
+     * @return 本实例（便于链式调用）
+     */
+    public NoticeWindow setNoMainLink() {
+        this.noMainLink = true;
+        return this;
+    }
+
+    /**
+     * 通知显示/关闭时同步主悬浮课条的显隐：有参与联动的通知正在显示时隐藏课条，
+     * 全部关闭后恢复（仅恢复因通知而隐藏的情况，用户主动隐藏不被覆盖）。
+     */
+    private static void syncMainWindow() {
+        if (Main.mw == null) {
+            return;
+        }
+        if (activeCount > 0) {
+            if (Main.mw.isVisible() && !mainHiddenByNotice) {
+                mainHiddenByNotice = true;
+                Main.mw.setVisible(false);
+            }
+        } else if (mainHiddenByNotice) {
+            mainHiddenByNotice = false;
+            Main.mw.setVisible(true);
+            FrameTray.setLabel();
+        }
+    }
+
     /** 文字滚动当前 X 偏移。 */
     private int scrollX;
 
@@ -159,9 +203,16 @@ public class NoticeWindow extends JWindow {
     }
 
     /**
-     * 触发关闭回调。
+     * 触发关闭回调，并（若本通知参与联动）从活跃计数中移除、恢复主课条。
      */
     private void fireCloseCallback() {
+        if (counted) {
+            counted = false;
+            if (!noMainLink) {
+                activeCount--;
+            }
+            syncMainWindow();
+        }
         if (closeCallback != null) {
             closeCallback.actionPerformed(new ActionEvent(this, 0, "closed"));
         }
@@ -190,6 +241,14 @@ public class NoticeWindow extends JWindow {
             remainingTicks = totalTicks;
             scrollX = needScroll() ? WIDTH : (WIDTH - getTextWidth()) / 2;
             super.setVisible(true);
+            // 计入活跃通知并同步主课条（仅首次显示；同一实例重复显示不重复计数）
+            if (!counted) {
+                counted = true;
+                if (!noMainLink) {
+                    activeCount++;
+                }
+                syncMainWindow();
+            }
             state = State.SLIDING_IN;
             animationTimer.start();
         } else {
