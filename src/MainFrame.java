@@ -145,7 +145,7 @@ public class MainFrame extends JFrame implements ActionListener {
     private final JButton testCmdBtn = new JButton("命令测试");
 
     // ---- 自动更新 ----
-    /** 镜像域名输入框（只写域名，空 = 默认 GitHub 直连；改变即保存到 .local）。 */
+    /** 镜像地址输入框（可带 https:// 头，空 = 默认 GitHub 直连；改变即保存到 .local）。 */
     private JTextField mirrorField;
     /** 更新状态标签（当前版本 / 检查结果）。 */
     private JLabel updateStatusLabel;
@@ -264,17 +264,15 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.setLayout(new BoxLayout(tabSettings, BoxLayout.Y_AXIS));
         tabSettings.setBorder(new EmptyBorder(10, 8, 8, 8));
 
-        // 主题色
+        // 主题外观
         JLabel hueTitle = new JLabel("主题色相", SwingConstants.CENTER);
-        hueTitle.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        hueTitle.setFont(new Font("微软雅黑", Font.PLAIN, 11));
         hueTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
         hueSelector.setAlignmentX(Component.CENTER_ALIGNMENT);
         hueSelector.setMaximumSize(new Dimension(170, 30));
 
-        // Local 设置
-        JLabel localTitle = new JLabel("本地设置", SwingConstants.CENTER);
-        localTitle.setFont(new Font("微软雅黑", Font.BOLD, 13));
-        localTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
+        // 本地设置
+        JLabel localTitle = sectionTitle("本地设置");
 
         // 周次微调器（真实更改 WeekTurn 写入 .local）
         JLabel weekSpinnerTitle = new JLabel("当前周次", SwingConstants.CENTER);
@@ -317,41 +315,54 @@ public class MainFrame extends JFrame implements ActionListener {
             b.addActionListener(this);
         }
 
+        // ---- 主题外观 ----
+        tabSettings.add(sectionTitle("主题外观"));
+        tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(hueTitle);
         tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(hueSelector);
-        tabSettings.add(Box.createVerticalStrut(6));
+        tabSettings.add(Box.createVerticalStrut(10));
+        tabSettings.add(separator());
+        tabSettings.add(Box.createVerticalStrut(10));
+
+        // ---- 本地设置 ----
         tabSettings.add(localTitle);
         tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(weekSpinnerTitle);
         tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(weekSpinner);
-        tabSettings.add(Box.createVerticalStrut(6));
+        tabSettings.add(Box.createVerticalStrut(8));
         tabSettings.add(nightStudyCheck);
         tabSettings.add(aprilFoolCheck);
-        tabSettings.add(Box.createVerticalStrut(6));
+        tabSettings.add(Box.createVerticalStrut(10));
+        tabSettings.add(separator());
+        tabSettings.add(Box.createVerticalStrut(10));
+
+        // ---- 工具 ----
+        tabSettings.add(sectionTitle("工具"));
+        tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(courseManageBtn);
         tabSettings.add(Box.createVerticalStrut(4));
         tabSettings.add(testCmdBtn);
-        tabSettings.add(Box.createVerticalStrut(8));
+        tabSettings.add(Box.createVerticalStrut(10));
+        tabSettings.add(separator());
+        tabSettings.add(Box.createVerticalStrut(10));
 
         // ---- 自动更新 ----
-        JLabel updateTitle = new JLabel("自动更新", SwingConstants.CENTER);
-        updateTitle.setFont(new Font("微软雅黑", Font.BOLD, 13));
-        updateTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
-        // 镜像只写域名；仓库信息（RS6048/Schedule-On-Top/main）在下载时自动追加；
+        JLabel updateTitle = sectionTitle("自动更新");
+        // 镜像保留完整地址头（https://）；仓库信息（RS6048/Schedule-On-Top/main）在下载时自动追加；
         // 值一旦改变立即保存到 .local（无需保存按钮），留空 = 默认 GitHub 直连
         mirrorField = new JTextField(UpdateChecker.mirrorDomain());
         mirrorField.setMaximumSize(new Dimension(170, 24));
         mirrorField.setAlignmentX(Component.CENTER_ALIGNMENT);
-        mirrorField.setToolTipText("镜像域名（如 ghproxy.net），仓库信息下载时自动追加；留空 = 默认 GitHub 直连");
+        mirrorField.setToolTipText("镜像地址（如 https://ghproxy.net），仓库信息下载时自动追加；留空 = 默认 GitHub 直连");
         mirrorField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) { saveMirrorFromField(); }
             public void removeUpdate(javax.swing.event.DocumentEvent e) { saveMirrorFromField(); }
             public void changedUpdate(javax.swing.event.DocumentEvent e) { saveMirrorFromField(); }
         });
         updateStatusLabel = new JLabel("本地版本 v" + UpdateChecker.localVersion(), SwingConstants.CENTER);
-        updateStatusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 10));
+        updateStatusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 11));
         updateStatusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         checkUpdateBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
         checkUpdateBtn.setMaximumSize(new Dimension(120, 26));
@@ -413,6 +424,26 @@ public class MainFrame extends JFrame implements ActionListener {
     }
 
     /**
+     * 设置区块标题（BOLD 12 居中，统一各区块标题样式）。
+     */
+    private static JLabel sectionTitle(String text) {
+        JLabel l = new JLabel(text, SwingConstants.CENTER);
+        l.setFont(new Font("微软雅黑", Font.BOLD, 12));
+        l.setAlignmentX(Component.CENTER_ALIGNMENT);
+        return l;
+    }
+
+    /**
+     * 区块分隔线（水平 1px 浅灰线，宽度随 fitSettingsWidth 钳制）。
+     */
+    private static JSeparator separator() {
+        JSeparator s = new JSeparator(SwingConstants.HORIZONTAL);
+        s.setAlignmentX(Component.CENTER_ALIGNMENT);
+        s.setForeground(new Color(210, 210, 210));
+        return s;
+    }
+
+    /**
      * 将设置面板全部子组件的宽度钳制为视口可用宽度。
      *
      * <p>preferred/maximum/minimum 三个尺寸约束同步设为同一宽度，BoxLayout 才真正
@@ -428,6 +459,14 @@ public class MainFrame extends JFrame implements ActionListener {
             return;
         }
         for (java.awt.Component c : tab.getComponents()) {
+            if (c instanceof JSeparator jsep) {
+                // 分隔线：保留 1px 高度，仅拉宽到视口宽（否则按默认 max 高度会撑爆布局）
+                Dimension d = new Dimension(w, 1);
+                jsep.setPreferredSize(d);
+                jsep.setMaximumSize(d);
+                jsep.setMinimumSize(d);
+                continue;
+            }
             if (c instanceof javax.swing.JComponent jc) {
                 Dimension max = jc.getMaximumSize();
                 Dimension pref = jc.getPreferredSize();
@@ -804,13 +843,10 @@ public class MainFrame extends JFrame implements ActionListener {
             String position = date.getYear() + "@" + date.getMonthValue() + "@" + date.getDayOfMonth() + "@" + j;
             String abbr = arr[j];
             if (editMode) {
-                // 编辑模式：课间（空字符串→空格）/午饭（|）均显示，空位（\）仍为空
-                if (Objects.equals(abbr, "\\")) {
-                    cells.add(emptyCell());
-                } else {
-                    String cellAbbr = abbr.isEmpty() ? " " : abbr;
-                    cells.add(new ComboCell(position, cellAbbr));
-                }
+                // 编辑模式：课间（空→空格）/午饭（|）/空位（\）均显示为可编辑下拉框，
+                // 使新增时段（占位 \）后可直接在空位选择课程
+                String cellAbbr = abbr.isEmpty() ? " " : abbr;
+                cells.add(new ComboCell(position, cellAbbr));
             } else {
                 String display;
                 switch (abbr) {
@@ -1548,11 +1584,8 @@ public class MainFrame extends JFrame implements ActionListener {
         }
     }
 
-    /** 轮次区块的课程单元格（位置 sec@weekRow@timeIdx）。 */
+    /** 轮次区块的课程单元格（位置 sec@weekRow@timeIdx）；空位（\）也显示为可编辑下拉框。 */
     private JComponent rotationCell(EditSection section, int weekRow, int timeIdx, String abbr) {
-        if (Objects.equals(abbr, "\\")) {
-            return emptyCell();
-        }
         String pos = section.name() + "@" + weekRow + "@" + timeIdx;
         return new ComboCell(pos, abbr.isEmpty() ? " " : abbr);
     }
@@ -2050,17 +2083,24 @@ public class MainFrame extends JFrame implements ActionListener {
             setOpaque(false);
             setPreferredSize(new Dimension(70, 50));
 
-            // 当前课程的显示名（优先全称，无映射时退化为简称）
-            String currentFull = fullToAbbr.entrySet().stream()
-                    .filter(e -> e.getValue().equals(abbr))
-                    .map(Map.Entry::getKey)
-                    .findFirst().orElse(abbr);
+            // 当前课程的显示名（优先全称；\ 与空格（空课程）归为"无课"项）
+            String currentFull;
+            if (abbr.equals("\\") || abbr.equals(" ")) {
+                currentFull = "\\";
+            } else {
+                currentFull = fullToAbbr.entrySet().stream()
+                        .filter(e -> e.getValue().equals(abbr))
+                        .map(Map.Entry::getKey)
+                        .findFirst().orElse(abbr);
+            }
 
             combo.setFont(new Font("微软雅黑", Font.PLAIN, 11));
             combo.setBackground(Color.WHITE);
             combo.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(new Color(200, 200, 200)),
                     BorderFactory.createEmptyBorder(1, 3, 1, 3)));
+            // 第一项：无课占位符（\），选中即把该格改回无课
+            combo.addItem("\\");
             for (String n : fullNames) {
                 combo.addItem(n);
             }
@@ -2070,7 +2110,8 @@ public class MainFrame extends JFrame implements ActionListener {
             combo.addActionListener(e -> {
                 Object sel = combo.getSelectedItem();
                 if (sel == null) return;
-                String newAbbr = fullToAbbr.get(sel.toString());
+                String newAbbr = sel.toString().equals("\\")
+                        ? "\\" : fullToAbbr.get(sel.toString());
                 if (newAbbr == null || newAbbr.isEmpty() || newAbbr.equals(abbr)) return;
                 applyChangeToCell(position, newAbbr);
             });
