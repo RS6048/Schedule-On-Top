@@ -101,6 +101,17 @@ public class Main {
     /** 最近一次 reload 的脚本上下文（tick.txt 每次更新基于其拷贝执行）。 */
     static volatile SScriptInterpreter.Context lastCtx;
 
+    /**
+     * load/tick 脚本内存缓存：reload() 时从文件读取并做 mcfunction 式加载校验后载入内存；
+     * 含错误语句的整个文件不记录（为 null 表示该段被作废、不执行）。此后 load 在 reload()、
+     * tick 在每次更新循环中均直接执行缓存内容，不再每次读文件。
+     */
+    private static volatile List<String> cachedLoadScript;
+    private static volatile List<String> cachedTickScript;
+
+    /** 脚本缓存对应的日期（跨天时 tick 侧刷新一次缓存；一天至多读一次文件）。 */
+    private static volatile LocalDate scriptCacheDate;
+
     /** 时间偏移（秒）："我的时间慢了x秒"，课表时间判断与 $time$ 宏同步偏移。 */
     static volatile int timeOffsetSeconds = 0;
 
@@ -351,9 +362,9 @@ public class Main {
             writeFile(sstudy,
                     """
                             17:00 18:00
-                            一 信 数 信 数 \\
-                            二 数 英 物 化 \\
-                            三 信 语 信 数 \\
+                            一 信 数 信 数 \
+                            二 数 英 物 化 \
+                            三 信 语 信 数 \
                             """);
         }
         // night_study.txt：晚自习时间段（成对 HH:mm）。仅当本地开启晚自习且为周一~周五时生效
@@ -659,6 +670,15 @@ public class Main {
                 ensureAutoDelaySchedule(today, baseSchedule, duty, scheds);
             } catch (IOException e) {
                 System.err.println("[delay] 自动创建延迟课表失败: " + e.getMessage());
+            }
+
+            // reload() 时将 load.txt / tick.txt（含当天手动延迟课表的 load/tick 块）读取并做
+            // 加载校验后载入内存（mcfunction 式：含错误语句的整个文件不记录），
+            // 此后执行均用内存缓存、不再每次读文件
+            try {
+                refreshScriptCache();
+            } catch (IOException e) {
+                System.err.println("[脚本] 载入脚本缓存失败: " + e.getMessage());
             }
 
             // 执行命令脚本：load.txt 在后台线程执行（避免 delay/cmd 阻塞 EDT），
@@ -1083,34 +1103,106 @@ public class Main {
     }
 
     /**
-     * 执行 ./data/commands/load.txt（每次 {@link #reload()} 时加载），并追加
-     * 当天手动延迟课表中的 {@code --- load ---} 脚本块（仅当天生效）。
+     * 执行 load 脚本（每次 {@link #reload()} 时执行）：直接执行 {@link #refreshScriptCache()}
+     * 载入内存的 load.txt（含当天手动延迟课表的 {@code --- load ---} 块）缓存，
+     * <b>不再每次读文件</b>；缓存为 null（含错误语句、整个文件被作废）时该段不执行。
      *
      * <p>其余命令文件<b>不会自动执行</b>，需在脚本中用 {@code run <文件名>}
      * 命令显式调用（delay 的 load/tick 块中同样可用）；tick.txt 与当天
      * {@code --- tick ---} 块由 {@link #executeTickScript()} 在每次更新循环中执行。</p>
      *
      * @param ctx 脚本执行上下文（含课程列表、显示块、日期时间等）
-     * @throws IOException 读取脚本失败时抛出
+     * @throws IOException 无（保留签名以兼容调用方）
      */
     private static void executeLoadScript(SScriptInterpreter.Context ctx) throws IOException {
         List<String> script = new ArrayList<>();
-        File load = new File(commandsDir, "load.txt");
-        if (load.exists() && load.isFile()) {
-            script.addAll(readScriptLines(load));
-        }
-        // 当天手动延迟课表的 load 块（仅当天生效；自动快照不参与）
-        try {
-            DelayData delay = loadDelaySchedule(LocalDate.now());
-            if (delay != null && delay.loadScript != null && !delay.loadScript.isEmpty()) {
-                script.addAll(delay.loadScript);
-            }
-        } catch (IOException e) {
-            System.err.println("[delay] 读取 load 块失败: " + e.getMessage());
+        if (cachedLoadScript != null) {
+            script.addAll(cachedLoadScript);
         }
         if (!script.isEmpty()) {
             new SScriptInterpreter().execute(script, ctx);
         }
+    }
+
+    /**
+     * reload() 时执行：读取 load.txt / tick.txt 及当天手动延迟课表的 load/tick 块，
+     * 逐段做 mcfunction 式加载校验后载入内存缓存。含错误语句的整段<b>不记录</b>
+     * （对应段缓存为 null，执行时跳过），不会逐行执行到错误处才报错。
+     * 此后 load 在 reload()、tick 在每次更新循环中均直接执行缓存，不再每次读文件。
+     *
+     * @throws IOException 读取命令文件失败时抛出
+     */
+    private static void refreshScriptCache() throws IOException {
+        // load.txt 与 tick.txt（不存在时视为空脚本 = 有效）
+        List<String> loadLines = new ArrayList<>();
+        File load = new File(commandsDir, "load.txt");
+        if (load.exists() && load.isFile()) {
+            loadLines.addAll(readScriptLines(load));
+        }
+        List<String> tickLines = new ArrayList<>();
+        File tick = new File(commandsDir, "tick.txt");
+        if (tick.exists() && tick.isFile()) {
+            tickLines.addAll(readScriptLines(tick));
+        }
+        List<String> loadValid = validateAndCache("load.txt", loadLines);
+        List<String> tickValid = validateAndCache("tick.txt", tickLines);
+
+        // 当天手动延迟课表的 load/tick 块（仅当天生效；自动快照不参与），逐段校验
+        List<String> delayLoad = new ArrayList<>();
+        List<String> delayTick = new ArrayList<>();
+        try {
+            DelayData delay = loadDelaySchedule(LocalDate.now());
+            if (delay != null) {
+                if (delay.loadScript != null && !delay.loadScript.isEmpty()) {
+                    delayLoad.addAll(delay.loadScript);
+                }
+                if (delay.tickScript != null && !delay.tickScript.isEmpty()) {
+                    delayTick.addAll(delay.tickScript);
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("[delay] 读取 load/tick 块失败: " + e.getMessage());
+        }
+        List<String> delayLoadValid = validateAndCache("delay ---load--- 块", delayLoad);
+        List<String> delayTickValid = validateAndCache("delay ---tick--- 块", delayTick);
+
+        cachedLoadScript = mergeValid(loadValid, delayLoadValid);
+        cachedTickScript = mergeValid(tickValid, delayTickValid);
+        scriptCacheDate = LocalDate.now();
+    }
+
+    /**
+     * 对一段脚本做加载校验（mcfunction 式）：任一错误语句（未知命令 / 结构不闭合）
+     * 使<b>整个文件不记录</b>。空文件视为有效（无可执行内容）。
+     *
+     * @param name  文件/块名（仅用于日志提示）
+     * @param lines 脚本行
+     * @return 有效脚本的拷贝；含错误语句时返回 null（整段不记录）
+     */
+    private static List<String> validateAndCache(String name, List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return new ArrayList<>();
+        }
+        if (!SScriptInterpreter.validate(lines)) {
+            System.err.println("[脚本] 命令文件 " + name + " 含错误语句：整个文件不记录，本次不执行该文件");
+            return null;
+        }
+        return new ArrayList<>(lines);
+    }
+
+    /** 拼接两段各自校验后的脚本（null 段跳过；两段均 null 时返回 null）。 */
+    private static List<String> mergeValid(List<String> a, List<String> b) {
+        if (a == null && b == null) {
+            return null;
+        }
+        List<String> out = new ArrayList<>();
+        if (a != null) {
+            out.addAll(a);
+        }
+        if (b != null) {
+            out.addAll(b);
+        }
+        return out;
     }
 
     /**
@@ -1145,8 +1237,9 @@ public class Main {
     }
 
     /**
-     * 执行 ./data/commands/tick.txt（每次更新循环加载），并追加当天手动延迟课表中的
-     * {@code --- tick ---} 脚本块（仅当天生效）。
+     * 执行 tick 脚本（每次更新循环 1s 执行）：直接执行 {@link #refreshScriptCache()}
+     * 载入内存的 tick.txt（含当天手动延迟课表的 {@code --- tick ---} 块）缓存，
+     * <b>不再每次读文件</b>；仅跨天（或尚未缓存）时刷新一次缓存（一天至多读一次）。
      *
      * <p>基于 reload 的基础上下文拷贝独立执行（每次从基准状态开始，
      * addblock 等结果仅作用于当次显示、不会跨 tick 累积），
@@ -1160,23 +1253,17 @@ public class Main {
         if (base == null) {
             return;
         }
-        // 汇总 tick.txt 与当天手动延迟课表的 tick 块；两者都不存在时本次无事可做
-        List<String> script = new ArrayList<>();
-        File tickFile = new File(commandsDir, "tick.txt");
-        if (tickFile.exists() && tickFile.isFile()) {
+        // 跨天（或从未缓存）时刷新一次脚本缓存：仅日期切换时读文件，非每次 tick 读
+        if (scriptCacheDate == null || !LocalDate.now().equals(scriptCacheDate)) {
             try {
-                script.addAll(readScriptLines(tickFile));
+                refreshScriptCache();
             } catch (IOException e) {
-                System.err.println("[脚本] 读取 tick.txt 失败: " + e.getMessage());
+                System.err.println("[脚本] 刷新脚本缓存失败: " + e.getMessage());
             }
         }
-        try {
-            DelayData delay = loadDelaySchedule(LocalDate.now());
-            if (delay != null && delay.tickScript != null && !delay.tickScript.isEmpty()) {
-                script.addAll(delay.tickScript);
-            }
-        } catch (IOException e) {
-            System.err.println("[delay] 读取 tick 块失败: " + e.getMessage());
+        List<String> script = new ArrayList<>();
+        if (cachedTickScript != null) {
+            script.addAll(cachedTickScript);
         }
         if (script.isEmpty()) {
             return;

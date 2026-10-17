@@ -1332,4 +1332,97 @@ public class SScriptInterpreter {
             default: return "";
         }
     }
+
+    // ==================================================================
+    // 加载校验（类 Minecraft 数据包 mcfunction 机制）
+    // ==================================================================
+
+    /** 全部已知命令（小写，与 {@link #executeLine(String)} 的 switch 保持一致）。 */
+    private static final Set<String> KNOWN_COMMANDS = Set.of(
+            "set", "add", "sub", "mul", "div", "mod",
+            "if", "else", "endif", "while", "endwhile",
+            "func", "endfunc", "call", "return",
+            "getcourse", "setcourse", "replace",
+            "addblock", "delblock", "removeblock",
+            "cmd", "admcmd", "mouse", "click", "clickright",
+            "key", "type", "delay", "run",
+            "splashscreen", "shownotify", "popcircle",
+            "print", "exit");
+
+    /**
+     * 静态校验一段脚本（加载时一次性解析，mcfunction 式）：脚本中存在<b>任何</b>
+     * 错误语句（未知命令、或 if/else/endif、while/endwhile、func/endfunc 结构不闭合）
+     * 即判定整个脚本无效。调用方应遵循“整个文件不记录”：校验失败时整体丢弃、
+     * 不执行任何一行（而不是逐行执行到错误处才报错）。
+     *
+     * <p>规则：</p>
+     * <ul>
+     *   <li>空行与 {@code #} 注释跳过；</li>
+     *   <li>行首 token 以 {@code $} 开头的动态命令（运行时经内联变量展开，如
+     *       {@code $action$ arg}）无法静态判定，不视为错误；</li>
+     *   <li>{@code else} 必须处于 {@code if} 块内，否则错误；</li>
+     *   <li>结构关键字配对不闭合（缺 {@code endif}/{@code endwhile}/{@code endfunc}，
+     *       或多余的结束关键字）即错误。</li>
+     * </ul>
+     *
+     * @param lines 脚本行
+     * @return true = 脚本有效；false = 含错误语句（整个文件不记录）
+     */
+    public static boolean validate(List<String> lines) {
+        if (lines == null) {
+            return false;
+        }
+        Deque<String> stack = new ArrayDeque<>();
+        for (String raw : lines) {
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            // 动态命令：第一 token 为 $变量（运行时展开为命令名），无法静态验证，放行
+            if (line.charAt(0) == '$') {
+                continue;
+            }
+            String cmd = line.split("\\s+")[0].toLowerCase(Locale.ROOT);
+            switch (cmd) {
+                case "if":     stack.push("if");     break;
+                case "while":  stack.push("while");  break;
+                case "func":   stack.push("func");   break;
+                case "else":
+                    // else 必须直接处于 if 块内
+                    if (stack.isEmpty() || !"if".equals(stack.peek())) {
+                        System.err.println("[脚本] 加载校验失败：else 不在 if 块内");
+                        return false;
+                    }
+                    break;
+                case "endif":
+                    if (stack.isEmpty() || !"if".equals(stack.pop())) {
+                        System.err.println("[脚本] 加载校验失败：endif 无匹配的 if");
+                        return false;
+                    }
+                    break;
+                case "endwhile":
+                    if (stack.isEmpty() || !"while".equals(stack.pop())) {
+                        System.err.println("[脚本] 加载校验失败：endwhile 无匹配的 while");
+                        return false;
+                    }
+                    break;
+                case "endfunc":
+                    if (stack.isEmpty() || !"func".equals(stack.pop())) {
+                        System.err.println("[脚本] 加载校验失败：endfunc 无匹配的 func");
+                        return false;
+                    }
+                    break;
+                default:
+                    if (!KNOWN_COMMANDS.contains(cmd)) {
+                        System.err.println("[脚本] 加载校验失败：未知命令 \"" + cmd + "\"");
+                        return false;
+                    }
+            }
+        }
+        if (!stack.isEmpty()) {
+            System.err.println("[脚本] 加载校验失败：结构未闭合（缺少 " + stack.peek() + " 的结束关键字）");
+            return false;
+        }
+        return true;
+    }
 }
