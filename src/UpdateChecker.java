@@ -24,9 +24,13 @@ import javax.swing.SwingUtilities;
  * 自动更新检查器。
  *
  * <p>从远程仓库（GitHub raw 或国内镜像）拉取 {@code update/version.json}，
- * 与本地 {@code version.txt} 比对版本；有新版时下载清单中列出的文件覆盖本地源码，
- * 并尝试用 javac 重新编译到 {@code out/production/ScrollSched}（IDEA 输出布局）。
- * 更新后需重启程序生效。</p>
+ * 与本地 {@code version.txt} 比对版本；有新版时<b>按远端 version.json 的 files 清单</b>
+ * 下载文件覆盖本地源码（本地文件不参与文件列表的生成），并尝试用 javac 重新编译到
+ * {@code out/production/ScrollSched}（IDEA 输出布局）。更新后需重启程序生效。</p>
+ *
+ * <p>清单容错：若远端清单中残留了新版本已删除的旧文件（如历史上的
+ * {@code src/CommentWindow.java}），下载时该文件返回 404 会被跳过，不影响其余文件
+ * 与整体更新流程——不会因单条过期清单条目而更新失败。</p>
  *
  * <p>镜像配置：镜像<b>保留完整地址头</b>（存于 {@code data/.local} 第 6 行，如
  * {@code https://ghproxy.net}、{@code gitee.com}）——仓库信息
@@ -56,7 +60,7 @@ public class UpdateChecker {
     private static final File VERSION_FILE = new File("./data/version.txt");
 
     /** 当前程序版本（与推送的 version.json 一致）。 */
-    public static final String LOCAL_VERSION = "1.4.0";
+    public static final String LOCAL_VERSION = "1.6.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
@@ -206,6 +210,11 @@ public class UpdateChecker {
     /**
      * 下载更新清单中的文件到本地对应路径（覆盖）。
      *
+     * <p>文件列表来自 {@link #checkUpdate()} 解析的<b>远端 version.json</b>（新版本
+     * 的文件列表），本地文件不参与列表生成。下载时对单条清单容错：若远端返回 404
+     * （该文件在新版本中已删除，属清单过期条目），跳过并继续，不中断整体更新；
+     * 其他网络错误仍视为失败抛出。</p>
+     *
      * @param info 更新信息（files 为相对仓库根的路径）
      * @throws IOException 下载或写入失败时抛出
      */
@@ -214,6 +223,7 @@ public class UpdateChecker {
             return;
         }
         String base = lastWorkingBase != null ? lastWorkingBase : mirrorBase();
+        List<String> skipped = new ArrayList<>();
         for (String path : info.files) {
             if (path == null || path.isEmpty() || path.startsWith("/") || path.contains("..")) {
                 throw new IOException("非法更新路径: " + path);
@@ -222,9 +232,24 @@ public class UpdateChecker {
             if (target.getParentFile() != null) {
                 target.getParentFile().mkdirs();
             }
-            String content = httpGet(base + "/" + path);
-            Files.write(target.toPath(), content.getBytes(StandardCharsets.UTF_8));
-            System.out.println("[update] 已下载: " + path);
+            String url = base + "/" + path;
+            try {
+                String content = httpGet(url);
+                Files.write(target.toPath(), content.getBytes(StandardCharsets.UTF_8));
+                System.out.println("[update] 已下载: " + path);
+            } catch (IOException e) {
+                // 404 = 清单中残留的旧文件在新版本中已删除 → 跳过该条，继续下载其余文件；
+                // 其余错误（网络中断/源不可达等）仍按失败处理，避免静默“成功”
+                if (e.getMessage() != null && e.getMessage().contains("HTTP 404")) {
+                    System.out.println("[update] 跳过（新版本已删除）: " + path);
+                    skipped.add(path);
+                } else {
+                    throw e;
+                }
+            }
+        }
+        if (!skipped.isEmpty()) {
+            System.out.println("[update] 清单过期条目已跳过: " + String.join(", ", skipped));
         }
     }
 
