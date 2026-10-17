@@ -1,6 +1,6 @@
 {
-  "version": "1.4.0",
-  "note": "编辑课表界面重设计：设置-编辑模式改为纵向三区块（周中 / 周六 / 晚自习）。周中表头=时间|周一~五，时间单元格 [开始~结束 − ＋]：点击可编辑时间、− 删除该时段（同步删各天对应课程列）、＋ 下方插入新时段（同步各天补空位）；课间/隐藏字符（$---$ 上方课程）在下拉中可见可编辑。周六/晚自习区块：行=时间段、列=周次轮次（[第N周 −] 可删、[＋] 可追加周次行），时间行同样可调可删可插入。移除设置面板中「更改时段」「周六时段与轮次」「晚自习轮次」三个弹窗按钮，全部功能并入编辑模式网格",
+  "version": "1.6.0",
+  "note": "更新流程修复：下载文件列表始终以远端 version.json 为准，清单中残留的已删除旧文件（如 CommentWindow.java）下载时返回 404 将被跳过，不再导致整体更新失败；load.txt/tick.txt 改为 reload() 时载入内存执行（mcfunction 式加载校验：脚本含未知命令或结构不闭合时整个文件不记录、不执行）；NoticeWindow 样式统一为白底黑字、无圆角，进度条固定绘制在底部最上层；新增 admcmd 管理员命令（UAC 提权执行单条命令）；重写 README（命令/宏/镜像参考，镜像保留 https:// 头）",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
@@ -9,7 +9,6 @@
     "src/ScriptSplash.java",
     "src/NoticeWindow.java",
     "src/CircleAnimationWindow.java",
-    "src/CommentWindow.java",
     "src/SimpleWindow.java",
     "src/TimeChecker.java",
     "src/IniFileReader.java",

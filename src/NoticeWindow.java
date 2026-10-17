@@ -305,39 +305,42 @@ public class NoticeWindow extends JWindow {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // 底部倒计时进度条（空内容时也必须绘制，作为唯一可见元素）
-        float progress = totalTicks > 0 ? (float) remainingTicks / totalTicks : 0;
-        if (Main.mw != null && Main.mw.theme != null) {
-            g2.setColor(Main.mw.theme);
-        } else {
-            g2.setColor(new Color(100, 180, 255));
-        }
-        g2.fillRect(0, getHeight() - PROGRESS_HEIGHT, (int) (WIDTH * progress), PROGRESS_HEIGHT);
-
-        // 空内容窗口仅显示进度条（倒计时指示器），直接返回
+        // 空内容窗口：仅绘制底部进度条（倒计时指示器），无背景
         if (detail.isEmpty()) {
+            drawProgressBar(g2);
             g2.dispose();
             return;
         }
 
-        // 半透明圆角背景
-        g2.setColor(new Color(30, 30, 30, 200));
-        g2.fillRoundRect(0, 0, WIDTH, HEIGHT, 8, 8);
-
-        // 顶部主题色装饰线
-        if (Main.mw != null && Main.mw.theme != null) {
-            g2.setColor(Main.mw.theme);
-            g2.fillRoundRect(0, 0, WIDTH, 2, 8, 8);
-        }
+        // 白底黑字（与主课表一致），无圆角
+        g2.setColor(Color.WHITE);
+        g2.fillRect(0, 0, WIDTH, HEIGHT);
 
         // 文本（裁剪到窗口范围内，支持滚动）
-        g2.setColor(Color.WHITE);
+        g2.setColor(Color.BLACK);
         g2.setFont(FONT);
         g2.setClip(4, 0, WIDTH - 8, HEIGHT - PROGRESS_HEIGHT);
         int textY = (HEIGHT - PROGRESS_HEIGHT) / 2 + g2.getFontMetrics().getAscent() / 2 - 2;
         g2.drawString(detail, scrollX, textY);
         g2.setClip(null);
 
+        // 进度条最后绘制：位于底部、z 顺序最上层，不被背景覆盖
+        drawProgressBar(g2);
+
         g2.dispose();
+    }
+
+    /**
+     * 绘制底部倒计时进度条（主题色，与主课表进度条一致）。
+     * 仅在窗口底部绘制、置于最上层，不参与圆角/背景层。
+     *
+     * @param g2 图形上下文
+     */
+    private void drawProgressBar(Graphics2D g2) {
+        float progress = totalTicks > 0 ? (float) remainingTicks / totalTicks : 0;
+        Color bar = (Main.mw != null && Main.mw.theme != null)
+                ? Main.mw.theme : new Color(100, 180, 255);
+        g2.setColor(bar);
+        g2.fillRect(0, getHeight() - PROGRESS_HEIGHT, (int) (WIDTH * progress), PROGRESS_HEIGHT);
     }
 }
