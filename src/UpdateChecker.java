@@ -58,23 +58,21 @@ public class UpdateChecker {
     };
 
     /** 当前程序版本（硬编码于源码，与推送的 version.json 一致；不使用 version.txt）。 */
-    public static final String LOCAL_VERSION = "1.7.0";
+    public static final String LOCAL_VERSION = "1.8.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
 
-    /** 更新信息：远程版本、说明与待更新文件清单。 */
-    public static class UpdateInfo {
-        public final String version;
-        public final String note;
-        public final List<String> files;
-
-        public UpdateInfo(String version, String note, List<String> files) {
-            this.version = version;
-            this.note = note == null ? "" : note;
-            this.files = files == null ? new ArrayList<>() : files;
+    /**
+     * 更新信息：远程版本、说明与待更新文件清单。
+     */
+        public record UpdateInfo(String version, String note, List<String> files) {
+            public UpdateInfo(String version, String note, List<String> files) {
+                this.version = version;
+                this.note = note == null ? "" : note;
+                this.files = files == null ? new ArrayList<>() : files;
+            }
         }
-    }
 
     private UpdateChecker() {
     }

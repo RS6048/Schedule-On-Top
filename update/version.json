@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.8.0",
   "note": "版本号改为硬编码（移除 version.txt，版本随源码编译、重启生效）；新增“启动时检查更新”开关（存于 data/.local 第 7 行，设置面板可勾选，关闭后启动不再自动检查，仍可手动点“检查更新”）；其余保持：下载清单以远端 version.json 为准、单条 404 跳过、load/tick 脚本内存缓存与整文件校验、NoticeWindow 白底黑字无圆角、admcmd 管理员命令",
   "files": [
     "src/Main.java",

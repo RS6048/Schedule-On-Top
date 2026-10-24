@@ -28,8 +28,10 @@ public class MainWindow extends JWindow {
     /** 主显示字体。 */
     public static final Font f = new Font("宋体", Font.BOLD, 20);
 
-    /** 全局共享的通知面板实例。 */
-    public static NoticeWindow cd = new NoticeWindow("", 10000);
+    /** 全局共享的通知面板实例（单击隐藏时显示的倒计时窗口）。
+     *  不联动主课条：显示/关闭均由 handleClick 与 closeCallback 控制，
+     *  避免 syncMainWindow 在“第三次隐藏后”仍无条件恢复课表。 */
+    public static NoticeWindow cd = new NoticeWindow("", 10000).setNoMainLink();
 
     /** 窗口高度（固定）。 */
     private static final int WINDOW_HEIGHT = 30;
@@ -90,7 +92,10 @@ public class MainWindow extends JWindow {
 
     static {
         cd.setInvokeOnClose(e -> {
-            if (Main.mw != null) {
+            // 单击隐藏 = 临时隐藏：倒计时窗口（cd）结束后自动恢复课表。
+            // 仅一分钟内连续隐藏不超过 3 次（clickTimes <= 2）时恢复；
+            // 一分钟内第 3 次隐藏（clickTimes > 2）视为真正关闭显示，不再自动恢复（去托盘）。
+            if (Main.mw != null && clickTimes <= 2) {
                 Main.mw.setVisible(true);
                 FrameTray.setLabel();
             }
@@ -186,7 +191,11 @@ public class MainWindow extends JWindow {
     }
 
     /**
-     * 处理窗口点击：隐藏主窗口、显示通知面板，连续点击过多时提示。
+     * 处理窗口点击：临时隐藏主窗口并显示倒计时窗口（cd）。
+     *
+     * <p>前两次隐藏为<b>临时隐藏</b>：cd 倒计时结束后自动恢复课表；
+     * 一分钟内连续点击第 3 次（clickTimes &gt; 2）为<b>真正关闭显示</b>：
+     * 弹出警告提示去系统托盘恢复，倒计时结束也不再自动出现。</p>
      */
     private void handleClick() {
         clickResetTimer.restart();
