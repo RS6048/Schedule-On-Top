@@ -816,12 +816,27 @@ public class MainFrame extends JFrame implements ActionListener {
             base = sb.toString().trim();
         }
 
-        // 课表模式：晚自习（~）追加到行尾——与 Main.getSchedule 一致
-        // （周一~周五且本地开启时），使晚自习 token 参与换课定位与 load.txt 预览
+        // 课表模式：晚自习追加到行尾——与 Main.getSchedule 完全一致
+        // （周一~周五且本地开启时）：自习科目（self_study.txt 轮次行按周次取当天科目）+ 晚自习标记 ~，
+        // 使晚自习 token 参与换课定位与 load.txt 预览；该天科目为空位（\）时仅保留 ~ 占位
         if (!editMode && date.getDayOfWeek().getValue() <= 5
                 && Main.getLocal("HasNightStudy", 0) == 1 && readNightTokens().length >= 2) {
+            String selfStudy = "";
+            try {
+                String[] weekSelfStudy = Main.getLine(weekTurn, Main.sstudy, 1).split(" ");
+                int dayIdx = date.getDayOfWeek().getValue() - 1;
+                if (dayIdx < weekSelfStudy.length) {
+                    selfStudy = weekSelfStudy[dayIdx];
+                }
+            } catch (java.io.IOException ignored) {
+                // 读取失败视为无自习科目
+            }
             base = base.trim();
-            base = base.isEmpty() ? "~" : base + " ~";
+            if (selfStudy.isEmpty() || "\\".equals(selfStudy)) {
+                base = base.isEmpty() ? "~" : base + " ~";
+            } else {
+                base = base.isEmpty() ? "| " + selfStudy + " ~" : base + " | " + selfStudy + " ~";
+            }
         }
 
         // 课表模式：先应用换课数据文件（data/swap.txt），再 dryRun 执行 load.txt
@@ -867,7 +882,8 @@ public class MainFrame extends JFrame implements ActionListener {
                         display = Main.iifr != null ? Main.iifr.get("|") : "|";
                         break;
                     case "~":
-                        display = Main.iifr != null ? Main.iifr.get("~") : "晚自习";
+                        // 与主课条 paint 一致：晚自习标记 ~ 压缩为空白（自习科目已单独显示）
+                        display = "";
                         break;
                     default:
                         display = abbr;

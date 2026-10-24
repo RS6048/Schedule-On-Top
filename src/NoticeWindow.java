@@ -68,6 +68,9 @@ public class NoticeWindow extends JWindow {
     /** 本实例是否已计入 activeCount（防止共享实例重复显示时重复计数）。 */
     private boolean counted = false;
 
+    /** 是否已彻底销毁（滑出完成并 super.dispose() 后置位，防止共享 owner 帧回收窗口时重入 dispose 触发二次回调）。 */
+    private boolean disposed = false;
+
     /** 是否不联动主课条（显示时不隐藏课表，关闭时不恢复）。 */
     private boolean noMainLink = false;
 
@@ -170,6 +173,7 @@ public class NoticeWindow extends JWindow {
                     animationTimer.stop();
                     super.setVisible(false);
                     fireCloseCallback();
+                    disposed = true;
                     super.dispose();
                 }
                 setLocation(getX(), y);
@@ -235,6 +239,8 @@ public class NoticeWindow extends JWindow {
             if (state == State.VISIBLE || state == State.SLIDING_IN) {
                 return;
             }
+            // 重新显示可能发生在 dispose 之后（共享实例复用），复位销毁标志
+            disposed = false;
             // 定位到屏幕中央水平位置、顶部之外
             int screenWidth = Toolkit.getDefaultToolkit().getScreenSize().width;
             setLocation((screenWidth - WIDTH) / 2, -getHeight());
@@ -263,12 +269,18 @@ public class NoticeWindow extends JWindow {
 
     @Override
     public void dispose() {
-        if (state == State.HIDDEN) {
-            fireCloseCallback();
-            super.dispose();
+        // 已彻底销毁（滑出完成或 HIDDEN 时）后，忽略共享 owner 帧回收窗口引发的二次 dispose，
+        // 避免 fireCloseCallback 重复触发
+        if (disposed) {
             return;
         }
         countdownTimer.stop();
+        if (state == State.HIDDEN) {
+            fireCloseCallback();
+            disposed = true;
+            super.dispose();
+            return;
+        }
         if (state == State.VISIBLE) {
             state = State.SLIDING_OUT;
             animationTimer.start();
