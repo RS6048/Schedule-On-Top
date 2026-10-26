@@ -62,7 +62,7 @@ public class UpdateChecker {
     private static final File VERSION_FILE = new File("./data/version.txt");
 
     /** 当前程序版本（与推送的 version.json 一致，硬编码，不依赖本地 version.txt）。 */
-    public static final String LOCAL_VERSION = "1.8.1";
+    public static final String LOCAL_VERSION = "1.8.2";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
