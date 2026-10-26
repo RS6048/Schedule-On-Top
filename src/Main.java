@@ -64,7 +64,7 @@ public class Main {
     /** 延迟课表目录（指定日期覆盖课表），后缀统一为 .txt。 */
     public static final File delayDir = new File("./data/delay");
 
-    /** 换课数据文件（两行一组，每行格式 {@code yyyy@mm@dd@名}）。 */
+    /** 换课数据文件（每行格式 {@code yyyy@mm@dd@课程序号@换课名称}）。 */
     public static final File swapFile = new File("./data/swap.txt");
 
     // ===== 运行时数据 =====
@@ -335,17 +335,10 @@ public class Main {
                     endif
                     """);
         }
-        // swap.txt（data/）：换课数据文件，两行一组构成一次换课；不存在则自动创建说明模板
+        // swap.txt（data/）：换课数据文件，每行一条记录 yyyy@mm@dd@课程序号@换课名称；
+        // 新记录自动覆盖同日期同学号的旧记录，写入不加注释行。不存在则自动创建空文件。
         if (!swapFile.exists()) {
-            writeFile(swapFile, """
-                    # 换课记录：两行一组构成一次换课，每行格式 yyyy@mm@dd@名
-                    # 名 = 课程全称（如 语文/数学/恰饭）或简称（如 语/数）；按课表 token 定位，
-                    # 位置含全部 token（第一节课与课间 | 等均计入）
-                    #
-                    # 示例：9月30日第2节（数学）与 10月1日第3节（语文）互换
-                    # 2026@09@30@数学
-                    # 2026@10@01@语文
-                    """);
+            writeFile(swapFile, "");
         }
 
         if (!schedule.exists()) {
@@ -421,17 +414,18 @@ public class Main {
 
     // ===== 换课数据文件（data/swap.txt）=====
 
-    /** 换课记录：日期 + 课程名（全称或简称）。 */
-    private record SwapLine(LocalDate date, String name) {
+    /** 换课记录：日期 + 课程序号（课表 token 序号，从 0 开始）+ 应替换成的课程名。 */
+    private record SwapLine(LocalDate date, int index, String name) {
     }
 
     /**
      * 应用 data/swap.txt 中的换课记录到课表字符串。
      *
-     * <p>文件格式：每行 {@code yyyy@mm@dd@名}，<b>两行一组</b>构成一次换课；
-     * 名 = 课程全称（如 {@code 语文}）或简称（如 {@code 语}）。应用时按名称定位
-     * 课表 token（第一节课与课间 {@code |}、空位 {@code \} 等全部 token 均计入位置），
-     * 将两门课互换；仅处理目标日期匹配的记录。</p>
+     * <p>文件格式：每行 {@code yyyy@mm@dd@课程序号@换课名称}，<b>单条记录自包含</b>——
+     * 表示“某日期、第 index 节课表 token 应替换为换课名称对应的课程”。换课名称为全称
+     * （如 {@code 语文}）或简称（如 {@code 语}），写入时按 full_name 映射还原为 token。
+     * 位置含全部 token（第一节课与课间 {@code |}、空位 {@code \} 等均计入）；
+     * 仅处理目标日期匹配的记录。</p>
      *
      * @param sched 课表文本（空格分隔）
      * @param date  目标日期
@@ -462,55 +456,74 @@ public class Main {
         }
         String[] arr = SScriptInterpreter.stripFormat(sched).split(" ");
         boolean changed = false;
-        for (int i = 0; i + 1 < lines.size(); i += 2) {
-            SwapLine l1 = lines.get(i);
-            SwapLine l2 = lines.get(i + 1);
-            if (l1.date.equals(date)) {
-                int p = findSwapToken(arr, l1.name);
-                if (p >= 0) {
-                    arr[p] = fullNameToToken(l2.name);
-                    changed = true;
-                }
-            }
-            if (l2.date.equals(date)) {
-                int p = findSwapToken(arr, l2.name);
-                if (p >= 0) {
-                    arr[p] = fullNameToToken(l1.name);
-                    changed = true;
-                }
+        for (SwapLine sl : lines) {
+            if (sl.date.equals(date) && sl.index >= 0 && sl.index < arr.length) {
+                arr[sl.index] = fullNameToToken(sl.name);
+                changed = true;
             }
         }
         return changed ? String.join(" ", arr) : sched;
     }
 
-    /** 解析换课行 {@code yyyy@mm@dd@名}；格式非法返回 null。 */
+    /**
+     * 追加一条换课记录到 data/swap.txt：与新记录<b>同一位点</b>（同日期、同学号）的旧记录
+     * 自动被覆盖剔除，写入不添加任何注释行。
+     *
+     * @param newLine 完整记录行 {@code yyyy@mm@dd@课程序号@换课名称}
+     * @throws IOException 读写换课文件失败时抛出
+     */
+    public static void upsertSwapRecord(String newLine) throws IOException {
+        if (newLine == null) {
+            return;
+        }
+        SwapLine fresh = parseSwapLine(newLine.trim());
+        if (fresh == null) {
+            // 非法记录不写入，避免脏数据污染 swap.txt
+            return;
+        }
+        List<String> kept = new ArrayList<>();
+        if (swapFile.exists()) {
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(new FileInputStream(swapFile), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    String t = line.trim();
+                    if (t.isEmpty() || t.startsWith("#")) {
+                        continue;
+                    }
+                    SwapLine old = parseSwapLine(t);
+                    // 同位点旧记录剔除（新记录覆盖）；其余记录原样保留
+                    if (old != null && fresh != null
+                            && old.date.equals(fresh.date) && old.index == fresh.index) {
+                        continue;
+                    }
+                    kept.add(line);
+                }
+            }
+        }
+        kept.add(newLine.trim());
+        writeFile(swapFile, String.join("\n", kept) + "\n");
+    }
+
+    /** 解析换课行 {@code yyyy@mm@dd@课程序号@换课名称}；格式非法（含旧版四段记录）返回 null。 */
     private static SwapLine parseSwapLine(String line) {
-        String[] p = line.split("@", 4);
-        if (p.length < 4) {
+        String[] p = line.split("@", 5);
+        if (p.length < 5) {
             return null;
         }
         try {
             int y = Integer.parseInt(p[0].trim());
             int m = Integer.parseInt(p[1].trim());
             int d = Integer.parseInt(p[2].trim());
-            String name = p[3].trim();
-            if (name.isEmpty()) {
+            int idx = Integer.parseInt(p[3].trim());
+            String name = p[4].trim();
+            if (name.isEmpty() || idx < 0) {
                 return null;
             }
-            return new SwapLine(LocalDate.of(y, m, d), name);
+            return new SwapLine(LocalDate.of(y, m, d), idx, name);
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    /** 在课表 token 数组中定位名称（全称或简称均可）的索引；未找到返回 -1。 */
-    private static int findSwapToken(String[] arr, String name) {
-        for (int i = 0; i < arr.length; i++) {
-            if (tokenToFullName(arr[i]).equals(name) || arr[i].equals(name)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     /**
@@ -640,8 +653,8 @@ public class Main {
                 cont = new String[]{baseSchedule, duty};
             }
 
-            // 换课数据文件（data/swap.txt，yyyy@mm@dd@名，两行一组）在基础课表之上应用。
-            // 位置按课表 token 定位（含课间 | 等全部 token）；换课作用于延迟课表之后、
+            // 换课数据文件（data/swap.txt，yyyy@mm@dd@课程序号@换课名称）在基础课表之上应用。
+            // 按日期匹配、直接替换对应序号位置的 token；换课作用于延迟课表之后、
             // load.txt 脚本之前，与旧版「load.txt 末尾 run swap.txt」的生效顺序一致。
             try {
                 baseSchedule = applySwapFile(baseSchedule, today);

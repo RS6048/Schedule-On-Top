@@ -1,6 +1,6 @@
 {
-  "version": "1.6.0",
-  "note": "更新流程修复：下载文件列表始终以远端 version.json 为准，清单中残留的已删除旧文件（如 CommentWindow.java）下载时返回 404 将被跳过，不再导致整体更新失败；load.txt/tick.txt 改为 reload() 时载入内存执行（mcfunction 式加载校验：脚本含未知命令或结构不闭合时整个文件不记录、不执行）；NoticeWindow 样式统一为白底黑字、无圆角，进度条固定绘制在底部最上层；新增 admcmd 管理员命令（UAC 提权执行单条命令）；重写 README（命令/宏/镜像参考，镜像保留 https:// 头）",
+  "version": "1.8.0",
+  "note": "换课记录格式重写：swap.txt 每条记录为 yyyy@mm@dd@课程序号@换课名称（单条自包含，直接替换该位置课程，不再两行一组互换）；新记录自动覆盖同日期同学号的旧记录，写入不再自动添加注释行；旧版四段记录不再被识别。",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
