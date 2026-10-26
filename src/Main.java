@@ -139,10 +139,16 @@ public class Main {
     /**
      * 启动自动更新检查（后台线程，不阻塞启动）。
      *
-     * <p>延迟数秒等主窗口就绪后静默检查；有新版时自动下载并重新编译，
-     * 完成后弹窗提示重启生效。更新源与镜像见 {@link UpdateChecker}。</p>
+     * <p>受 {@code .local} 的 {@code CheckOnStart} 开关控制（默认 1 = 开启）；
+     * 关闭后启动时不自动检查更新。开启时延迟数秒等主窗口就绪后静默检查；
+     * 有新版时弹窗由用户手动确认是否下载，更新完成后提示重启生效。</p>
      */
     private static void startAutoUpdate() {
+        // .local 开关 CheckOnStart（旧版无此键时默认 1 = 开启）；关闭则启动时不自动检查更新
+        if (getLocal("CheckOnStart", 1) != 1) {
+            System.out.println("[update] 启动时检查更新已关闭");
+            return;
+        }
         Thread t = new Thread(() -> {
             try {
                 Thread.sleep(4000);
@@ -422,7 +428,7 @@ public class Main {
      * 应用 data/swap.txt 中的换课记录到课表字符串。
      *
      * <p>文件格式：每行 {@code yyyy@mm@dd@课程序号@换课名称}，<b>单条记录自包含</b>——
-     * 表示“某日期、第 index 节课表 token 应替换为换课名称对应的课程”。换课名称为全称
+     * 表示"某日期、第 index 节课表 token 应替换为换课名称对应的课程"。换课名称为全称
      * （如 {@code 语文}）或简称（如 {@code 语}），写入时按 full_name 映射还原为 token。
      * 位置含全部 token（第一节课与课间 {@code |}、空位 {@code \} 等均计入）；
      * 仅处理目标日期匹配的记录。</p>
@@ -1368,6 +1374,10 @@ public class Main {
                 String m = sc.nextLine().trim();
                 if (!m.isEmpty()) mirrorDomain = m;
             }
+            // 第 7 行（可选）：启动时检查更新开关（旧版无此行时默认 1 = 开启）
+            if (sc.hasNextInt()) {
+                locals.put("CheckOnStart", sc.nextInt());
+            }
         }
     }
 
@@ -1384,6 +1394,7 @@ public class Main {
             fw.write(getLocal("AprilFool", 0) + "\n");
             fw.write(getLocal("Theme", 0) + "\n");
             fw.write(mirrorDomain == null ? "" : mirrorDomain + "\n");
+            fw.write(getLocal("CheckOnStart", 1) + "\n");
         }
     }
 

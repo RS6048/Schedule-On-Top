@@ -1,6 +1,6 @@
 {
-  "version": "1.8.1",
-  "note": "修复四项：①NoticeWindow 倒计时改用真实墙钟时间（System.currentTimeMillis）而非帧计数倒数，修复 EDT 繁忙时计时成倍拉长（60000ms 跑成两分钟），单击隐藏后倒计时准时结束、主课条准时恢复；②换课窗口每天最后一节补显 self_study.txt 对应自习科目（与主课表一致），不再只显示“晚自习”；③版本号硬编码进 jar，不再自动创建/写回 data/version.txt；④保留一分钟内单击三次才收起至托盘的计数逻辑。",
+  "version": "1.8.2",
+  "note": "补全 v1.7.0 遗留项：新增「启动时检查更新」开关。设置→自动更新区新增复选框，状态写入 data/.local 第7行 CheckOnStart（1=开启，默认开启；旧版无此行时按开启处理）；关闭后程序启动不再后台静默检查更新，仍可手动点「检查更新」。版本号硬编码 1.8.2，不生成 version.txt。",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
