@@ -52,11 +52,12 @@ public class NoticeWindow extends JWindow {
     /** 关闭回调。 */
     private ActionListener closeCallback;
 
-    /** 倒计时剩余帧数（每帧 TICK_INTERVAL 毫秒）。 */
-    private int remainingTicks;
-
-    /** 倒计时总帧数（用于进度条比例计算）。 */
-    private final int totalTicks;
+    /** 倒计时开始时刻（System.currentTimeMillis）。
+     *  <p>用真实墙钟时间而非帧计数倒数：Swing Timer 在 EDT 繁忙时实际触发间隔
+     *  远大于 TICK_INTERVAL，固定帧数倒数会让显示时长被成倍拉长
+     *  （60000ms 实际跑两分钟以上）。改为每帧按真实已过毫秒计算剩余时长，
+     *  Timer 即使丢帧/延迟，总时长仍精确。</p> */
+    private long startMillis;
 
     // ---- 主课条联动 ----
     /** 正在显示（滑入中/可见中）且参与课表联动的通知数量。 */
@@ -127,8 +128,6 @@ public class NoticeWindow extends JWindow {
     public NoticeWindow(String detail, int millis) {
         this.detail = detail == null ? "" : detail;
         this.displayMillis = Math.max(TICK_INTERVAL, millis);
-        this.totalTicks = displayMillis / TICK_INTERVAL;
-        this.remainingTicks = totalTicks;
 
         setAlwaysOnTop(true);
         setSize(WIDTH, detail.isEmpty() ? PROGRESS_HEIGHT : HEIGHT);
@@ -159,6 +158,7 @@ public class NoticeWindow extends JWindow {
                     y = 0;
                     state = State.VISIBLE;
                     animationTimer.stop();
+                    startMillis = System.currentTimeMillis();
                     countdownTimer.start();
                 }
                 setLocation(getX(), y);
@@ -176,9 +176,8 @@ public class NoticeWindow extends JWindow {
             }
         });
 
-        // 倒计时 + 文字滚动
+        // 倒计时 + 文字滚动（剩余时长按真实墙钟计算，Timer 丢帧不影响总时长）
         countdownTimer = new Timer(TICK_INTERVAL, e -> {
-            remainingTicks--;
             // 文字过长时滚动
             if (needScroll()) {
                 scrollX -= SCROLL_STEP;
@@ -187,7 +186,8 @@ public class NoticeWindow extends JWindow {
                 }
             }
             repaint();
-            if (remainingTicks <= 0) {
+            long elapsed = System.currentTimeMillis() - startMillis;
+            if (elapsed >= displayMillis) {
                 dispose();
             }
         });
@@ -238,7 +238,6 @@ public class NoticeWindow extends JWindow {
             // 定位到屏幕中央水平位置、顶部之外
             int screenWidth = Toolkit.getDefaultToolkit().getScreenSize().width;
             setLocation((screenWidth - WIDTH) / 2, -getHeight());
-            remainingTicks = totalTicks;
             scrollX = needScroll() ? WIDTH : (WIDTH - getTextWidth()) / 2;
             super.setVisible(true);
             // 计入活跃通知并同步主课条（仅首次显示；同一实例重复显示不重复计数）
@@ -337,7 +336,14 @@ public class NoticeWindow extends JWindow {
      * @param g2 图形上下文
      */
     private void drawProgressBar(Graphics2D g2) {
-        float progress = totalTicks > 0 ? (float) remainingTicks / totalTicks : 0;
+        // 进度按真实已过毫秒计算（startMillis==0 表示尚未开始倒计时，画满）
+        float progress;
+        if (startMillis == 0 || displayMillis <= 0) {
+            progress = 1f;
+        } else {
+            long elapsed = System.currentTimeMillis() - startMillis;
+            progress = Math.max(0f, Math.min(1f, 1f - (float) elapsed / displayMillis));
+        }
         Color bar = (Main.mw != null && Main.mw.theme != null)
                 ? Main.mw.theme : new Color(100, 180, 255);
         g2.setColor(bar);

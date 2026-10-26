@@ -1,6 +1,6 @@
 {
-  "version": "1.8.0",
-  "note": "换课记录格式重写：swap.txt 每条记录为 yyyy@mm@dd@课程序号@换课名称（单条自包含，直接替换该位置课程，不再两行一组互换）；新记录自动覆盖同日期同学号的旧记录，写入不再自动添加注释行；旧版四段记录不再被识别。",
+  "version": "1.8.1",
+  "note": "修复四项：①NoticeWindow 倒计时改用真实墙钟时间（System.currentTimeMillis）而非帧计数倒数，修复 EDT 繁忙时计时成倍拉长（60000ms 跑成两分钟），单击隐藏后倒计时准时结束、主课条准时恢复；②换课窗口每天最后一节补显 self_study.txt 对应自习科目（与主课表一致），不再只显示“晚自习”；③版本号硬编码进 jar，不再自动创建/写回 data/version.txt；④保留一分钟内单击三次才收起至托盘的计数逻辑。",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
