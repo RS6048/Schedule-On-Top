@@ -123,6 +123,8 @@ public class MainFrame extends JFrame implements ActionListener {
     private final JLabel weekLabel = new JLabel("第 - 周", SwingConstants.CENTER);
     private final JCheckBox nightStudyCheck = new JCheckBox("晚自习");
     private final JCheckBox aprilFoolCheck = new JCheckBox("愚人节彩蛋");
+    /** 自动更新：启动时检查更新开关（写入 .local 的 CheckOnStart）。 */
+    private final JCheckBox checkOnStartCheck = new JCheckBox("启动时检查更新");
     private final JLabel dateRangeLabel = new JLabel("", SwingConstants.CENTER);
     /** 换课模式预览周次（只预览不写入 .local；0 = 未初始化，reload 时取当前真实周次）。 */
     private int previewWeekTurn = 0;
@@ -368,8 +370,15 @@ public class MainFrame extends JFrame implements ActionListener {
         checkUpdateBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
         checkUpdateBtn.addActionListener(this);
 
+        checkOnStartCheck.setAlignmentX(Component.CENTER_ALIGNMENT);
+        checkOnStartCheck.setOpaque(false);
+        checkOnStartCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        checkOnStartCheck.addActionListener(e -> saveLocalSettings());
+
         tabSettings.add(updateTitle);
         tabSettings.add(Box.createVerticalStrut(4));
+        tabSettings.add(checkOnStartCheck);
+        tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(mirrorField);
         tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(checkUpdateBtn);
@@ -489,6 +498,7 @@ public class MainFrame extends JFrame implements ActionListener {
     private void setupControls() {
         nightStudyCheck.setSelected(Main.getLocal("HasNightStudy", 0) == 1);
         aprilFoolCheck.setSelected(Main.getLocal("AprilFool", 0) == 1);
+        checkOnStartCheck.setSelected(Main.getLocal("CheckOnStart", 1) == 1);
         hueSelector.setValue(Main.getLocal("Theme", 0));
 
         refreshCourseCombo();
@@ -548,15 +558,17 @@ public class MainFrame extends JFrame implements ActionListener {
     }
 
     /**
-     * 保存本地设置（晚自习、愚人节开关）。
+     * 保存本地设置（晚自习、愚人节、启动时检查更新开关）。
      */
     private void saveLocalSettings() {
         Main.locals.put("HasNightStudy", nightStudyCheck.isSelected() ? 1 : 0);
         Main.locals.put("AprilFool", aprilFoolCheck.isSelected() ? 1 : 0);
+        Main.locals.put("CheckOnStart", checkOnStartCheck.isSelected() ? 1 : 0);
         try {
             Main.saveLocals();
             System.out.println("[MainFrame] 本地设置已保存: 晚自习=" + nightStudyCheck.isSelected()
-                    + ", 愚人节=" + aprilFoolCheck.isSelected());
+                    + ", 愚人节=" + aprilFoolCheck.isSelected()
+                    + ", 启动时检查更新=" + checkOnStartCheck.isSelected());
         } catch (IOException ex) {
             Main.outputException(ex);
         }
