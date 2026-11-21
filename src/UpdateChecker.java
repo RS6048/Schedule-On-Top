@@ -1,11 +1,3 @@
-package com.scrollsched;
-
-import javax.swing.BorderFactory;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
-import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -21,12 +13,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.swing.BorderFactory;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.SwingUtilities;
 
 /**
  * 自动更新检查器。
  *
  * <p>从远程仓库（GitHub raw 或国内镜像）拉取 {@code update/version.json}，
- * 与本地硬编码版本比对；有新版时<b>按远端 version.json 的 files 清单</b>
+ * 与内置（硬编码）版本号比对；有新版时<b>按远端 version.json 的 files 清单</b>
  * 下载文件覆盖本地源码（本地文件不参与文件列表的生成），并尝试用 javac 重新编译到
  * {@code out/production/ScrollSched}（IDEA 输出布局）。更新后需重启程序生效。</p>
  *
@@ -35,7 +33,7 @@ import java.util.regex.Pattern;
  * 与整体更新流程——不会因单条过期清单条目而更新失败。</p>
  *
  * <p>镜像配置：镜像<b>保留完整地址头</b>（存于 {@code data/.local} 第 6 行，如
- * {@code https://ghproxy.net}、{@code gitee.com}）——仓库信息
+ * {@code https://ghproxy.net}、 {@code gitee.com}）——仓库信息
  * （{@code RS6048/Schedule-On-Top/main}）在下载时由程序自动追加，
  * 无需在输入框填写完整 URL。镜像值一旦改变立即保存（无需保存按钮）；
  * 留空 = 默认 GitHub raw 直连。使用默认地址失败时自动依次尝试常见镜像前缀。</p>
@@ -59,26 +57,22 @@ public class UpdateChecker {
             "https://mirror.ghproxy.com/"
     };
 
-    private static final File VERSION_FILE = new File("./data/version.txt");
-
-    /** 当前程序版本（与推送的 version.json 一致，硬编码，不依赖本地 version.txt）。 */
-    public static final String LOCAL_VERSION = "1.8.2";
+    /** 当前程序版本（硬编码于源码，与推送的 version.json 一致；不使用 version.txt）。 */
+    public static final String LOCAL_VERSION = "1.8.0";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
 
-    /** 更新信息：远程版本、说明与待更新文件清单。 */
-    public static class UpdateInfo {
-        public final String version;
-        public final String note;
-        public final List<String> files;
-
-        public UpdateInfo(String version, String note, List<String> files) {
-            this.version = version;
-            this.note = note == null ? "" : note;
-            this.files = files == null ? new ArrayList<>() : files;
+    /**
+     * 更新信息：远程版本、说明与待更新文件清单。
+     */
+        public record UpdateInfo(String version, String note, List<String> files) {
+            public UpdateInfo(String version, String note, List<String> files) {
+                this.version = version;
+                this.note = note == null ? "" : note;
+                this.files = files == null ? new ArrayList<>() : files;
+            }
         }
-    }
 
     private UpdateChecker() {
     }
@@ -126,23 +120,12 @@ public class UpdateChecker {
     }
 
     /**
-     * 读取本地版本号：<b>只读</b>。版本号硬编码在 {@link #LOCAL_VERSION} 中，
-     * 不再自动创建/写回 {@code data/version.txt}；旧的 version.txt 若存在仅作兼容读取。
+     * 本地版本号（硬编码）：版本随源码编译进程序，不再依赖 version.txt 文件。
+     * 更新后源码中的 {@link #LOCAL_VERSION} 随之升级，重启即生效。
      *
-     * @return 本地版本号（如 "1.0.0"）
+     * @return 本地版本号（如 "1.7.0"）
      */
     public static String localVersion() {
-        try {
-            if (VERSION_FILE.exists()) {
-                String v = new String(Files.readAllBytes(VERSION_FILE.toPath()), StandardCharsets.UTF_8)
-                        .replace("\uFEFF", "").trim();
-                if (!v.isEmpty()) {
-                    return v;
-                }
-            }
-        } catch (IOException ignored) {
-            // 无法读取时仍返回内置版本
-        }
         return LOCAL_VERSION;
     }
 
@@ -326,7 +309,7 @@ public class UpdateChecker {
 
     /**
      * 自动更新主流程（供后台线程调用）：检查 → 有新版则<b>弹窗由用户手动确认</b> →
-     * 确认后下载 → 重新编译 → 自动打包 jar → 更新本地版本。
+     * 确认后下载 → 重新编译 → 自动打包 jar → 提示重启生效（版本号硬编码于源码）。
      *
      * <p>即“自动检测，手动确认”：发现新版不会直接下载，先弹确认框；用户选“否”则放弃本次更新。</p>
      *
@@ -387,8 +370,6 @@ public class UpdateChecker {
                     cleanupSources();
                 }
             }
-            // 版本号硬编码在 LOCAL_VERSION（编译进 jar），更新成功后不再写 version.txt：
-            // 重启新 jar 后 localVersion() 直接返回新内置版本，无本地文件漂移
             StringBuilder sb = new StringBuilder();
             sb.append("已更新到 v").append(info.version).append("（").append(compile);
             if (jarMsg != null && !jarMsg.isEmpty()) {
