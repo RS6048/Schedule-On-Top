@@ -1,4 +1,5 @@
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -39,12 +40,12 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>网格 8 列：时间 / 周一~周五 / <b>周六时间（独立一列）</b> / 周六课程。
- * 临时换课通过 data/swap.txt 数据文件生效（每行 yyyy@mm@dd@课程序号@换课名称，同位点自动覆盖）。</p>
+ * 临时换课通过 data/swap.txt 数据文件生效（两行一组，yyyy@mm@dd@名）。</p>
  */
 public class MainFrame extends JFrame implements ActionListener {
 
     /** 窗口图标（PNG 字节数据）。 */
-    public static final byte[] logo = {-119,80,78,71,13,73,68,82,0,0,0,13,73,
+    public static final byte[] logo = {-119,80,78,71,13,10,26,10,0,0,0,13,73,
             72,68,82,0,0,0,32,0,0,0,32,8,2,0,0,0,-4,24,-19,-93,0,0,0,1,115,82,
             71,66,0,-82,-50,28,-23,0,0,0,4,103,65,77,65,0,0,-79,-113,11,-4,97,
             5,0,0,0,9,112,72,89,115,0,0,14,-61,0,0,14,-61,1,-57,111,-88,100,0,
@@ -77,7 +78,7 @@ public class MainFrame extends JFrame implements ActionListener {
             -56,51,-103,-116,-116,-68,101,-27,114,57,30,-113,-49,-51,-51,105,
             121,-40,-94,94,-81,-93,-58,-22,-22,-22,104,1,-100,-67,82,-87,-36,
             -34,-34,46,46,46,66,82,85,126,112,112,32,35,-17,6,-39,108,118,97,
-            97,101,101,-91,-41,-21,17,79,-104,-104,-104,56,62,62,62,60,60,
+            97,97,101,101,-91,-41,-21,17,79,-104,-104,-104,56,62,62,62,60,60,
             -36,-35,-35,69,-90,100,125,-96,124,46,-105,107,-75,90,-101,-101,
             -101,-38,-55,-60,-125,32,-48,10,-20,37,39,65,-128,-57,70,114,50,
             2,44,4,16,104,-53,-31,-94,0,80,28,-97,-74,109,-45,84,3,-87,-95,
@@ -90,7 +91,7 @@ public class MainFrame extends JFrame implements ActionListener {
             30,16,30,47,-107,74,59,59,59,-110,82,-128,86,-28,-13,121,92,113,
             125,125,29,125,-105,-84,7,19,-82,-89,-120,108,58,53,53,69,55,24,
             -75,41,-66,7,-8,2,14,-14,85,-96,64,52,26,69,-128,-123,-40,68,-67,
-            68,-72,-117,66,1,9,24,99,48,0,-127,-106,4,-113,63,4,-71,40,20,
+            68,-72,-117,66,1,9,24,99,48,0,-127,-106,64,-113,63,4,-71,40,20,
             -112,-128,-66,49,-62,64,-86,-100,40,48,-81,-82,-82,-24,46,-112,
             81,-112,44,-124,-9,84,-33,0,71,67,-117,96,9,-8,4,18,50,-91,-32,
             3,85,-81,-81,-81,-79,22,42,54,-111,-84,7,-66,-75,-75,37,35,-81,
@@ -123,8 +124,7 @@ public class MainFrame extends JFrame implements ActionListener {
     private final JLabel weekLabel = new JLabel("第 - 周", SwingConstants.CENTER);
     private final JCheckBox nightStudyCheck = new JCheckBox("晚自习");
     private final JCheckBox aprilFoolCheck = new JCheckBox("愚人节彩蛋");
-    /** 自动更新：启动时检查更新开关（写入 .local 的 CheckOnStart）。 */
-    private final JCheckBox checkOnStartCheck = new JCheckBox("启动时检查更新");
+    private final JCheckBox updateOnStartCheck = new JCheckBox("启动时检查更新");
     private final JLabel dateRangeLabel = new JLabel("", SwingConstants.CENTER);
     /** 换课模式预览周次（只预览不写入 .local；0 = 未初始化，reload 时取当前真实周次）。 */
     private int previewWeekTurn = 0;
@@ -229,7 +229,7 @@ public class MainFrame extends JFrame implements ActionListener {
         weekBtnPanel.add(prevWeekBtn);
         weekBtnPanel.add(nextWeekBtn);
 
-        // 临时换课按钮：选中两个课程单元格后互换（追加写入 data/swap.txt，两条记录各覆盖同位点）
+        // 临时换课按钮：选中两个课程单元格后互换（追加写入 data/swap.txt，两行一组）
         applyBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
         applyBtn.setMaximumSize(new Dimension(170, 28));
         applyBtn.setFont(new Font("微软雅黑", Font.BOLD, 11));
@@ -307,6 +307,11 @@ public class MainFrame extends JFrame implements ActionListener {
         aprilFoolCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         aprilFoolCheck.addActionListener(e -> saveLocalSettings());
 
+        updateOnStartCheck.setAlignmentX(Component.CENTER_ALIGNMENT);
+        updateOnStartCheck.setOpaque(false);
+        updateOnStartCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        updateOnStartCheck.addActionListener(e -> saveLocalSettings());
+
         // 课程管理 / 命令测试按钮（时段/周六/晚自习编辑已并入编辑模式网格）
         JButton[] settingBtns = {courseManageBtn, testCmdBtn};
         for (JButton b : settingBtns) {
@@ -335,6 +340,7 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.add(Box.createVerticalStrut(8));
         tabSettings.add(nightStudyCheck);
         tabSettings.add(aprilFoolCheck);
+        tabSettings.add(updateOnStartCheck);
         tabSettings.add(Box.createVerticalStrut(10));
         tabSettings.add(separator());
         tabSettings.add(Box.createVerticalStrut(10));
@@ -370,15 +376,8 @@ public class MainFrame extends JFrame implements ActionListener {
         checkUpdateBtn.setFont(new Font("微软雅黑", Font.PLAIN, 11));
         checkUpdateBtn.addActionListener(this);
 
-        checkOnStartCheck.setAlignmentX(Component.CENTER_ALIGNMENT);
-        checkOnStartCheck.setOpaque(false);
-        checkOnStartCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
-        checkOnStartCheck.addActionListener(e -> saveLocalSettings());
-
         tabSettings.add(updateTitle);
         tabSettings.add(Box.createVerticalStrut(4));
-        tabSettings.add(checkOnStartCheck);
-        tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(mirrorField);
         tabSettings.add(Box.createVerticalStrut(2));
         tabSettings.add(checkUpdateBtn);
@@ -498,7 +497,7 @@ public class MainFrame extends JFrame implements ActionListener {
     private void setupControls() {
         nightStudyCheck.setSelected(Main.getLocal("HasNightStudy", 0) == 1);
         aprilFoolCheck.setSelected(Main.getLocal("AprilFool", 0) == 1);
-        checkOnStartCheck.setSelected(Main.getLocal("CheckOnStart", 1) == 1);
+        updateOnStartCheck.setSelected(Main.checkUpdateOnStart == 1);
         hueSelector.setValue(Main.getLocal("Theme", 0));
 
         refreshCourseCombo();
@@ -563,12 +562,12 @@ public class MainFrame extends JFrame implements ActionListener {
     private void saveLocalSettings() {
         Main.locals.put("HasNightStudy", nightStudyCheck.isSelected() ? 1 : 0);
         Main.locals.put("AprilFool", aprilFoolCheck.isSelected() ? 1 : 0);
-        Main.locals.put("CheckOnStart", checkOnStartCheck.isSelected() ? 1 : 0);
+        Main.checkUpdateOnStart = updateOnStartCheck.isSelected() ? 1 : 0;
         try {
             Main.saveLocals();
             System.out.println("[MainFrame] 本地设置已保存: 晚自习=" + nightStudyCheck.isSelected()
                     + ", 愚人节=" + aprilFoolCheck.isSelected()
-                    + ", 启动时检查更新=" + checkOnStartCheck.isSelected());
+                    + ", 启动时检查更新=" + (Main.checkUpdateOnStart == 1));
         } catch (IOException ex) {
             Main.outputException(ex);
         }
@@ -654,7 +653,7 @@ public class MainFrame extends JFrame implements ActionListener {
     /**
      * 重新加载课表数据并重建网格。
      *
-     * <p><b>【课表】</b>（8 列）：表头 [时间、周一~周五、周六时间、周六]。
+     * <p><b>【课表】模式</b>（8 列）：表头 [时间、周一~周五、周六时间、周六]。
      * 周一至周五共用 schedule.txt 的时间列，周六使用 saturday.txt 自己的时间行
      * 单独成一列（示例中两者相同不代表一定相同）。课程块为 UnitPane
      * （点击选中两格 → 应用换课），并应用命令脚本（load.txt，dryRun 预览）
@@ -817,27 +816,27 @@ public class MainFrame extends JFrame implements ActionListener {
             base = sb.toString().trim();
         }
 
-        // 课表模式：自习科目（self_study.txt 对应周次轮次行，当天列）追加到行尾——
-        // 与 Main.getSchedule 一致：周日不追加；\ 占位表示当天无自习（不写 token）。
-        // 这样每天最后一节显示的是 self_study.txt 里的真实自习科目，而非“晚自习”。
-        if (!editMode && date.getDayOfWeek().getValue() <= 5) {
-            try {
-                String[] weekSelf = Main.getLine(weekTurn, Main.sstudy, 1).split(" ");
-                int dow = date.getDayOfWeek().getValue();
-                if (dow - 1 < weekSelf.length && !weekSelf[dow - 1].equals("\\")) {
-                    base = (base.isEmpty() ? "" : base.trim() + " ") + "| " + weekSelf[dow - 1];
-                }
-            } catch (Exception ignored) {
-                // self_study 缺失/轮次不足时跳过自习段，不影响主流程
-            }
-        }
-
-        // 课表模式：晚自习（~）追加到行尾——与 Main.getSchedule 一致
-        // （周一~周五且本地开启时），使晚自习 token 参与换课定位与 load.txt 预览
+        // 课表模式：晚自习追加到行尾——与 Main.getSchedule 完全一致
+        // （周一~周五且本地开启时）：自习科目（self_study.txt 轮次行按周次取当天科目）+ 晚自习标记 ~，
+        // 使晚自习 token 参与换课定位与 load.txt 预览；该天科目为空位（\）时仅保留 ~ 占位
         if (!editMode && date.getDayOfWeek().getValue() <= 5
                 && Main.getLocal("HasNightStudy", 0) == 1 && readNightTokens().length >= 2) {
+            String selfStudy = "";
+            try {
+                String[] weekSelfStudy = Main.getLine(weekTurn, Main.sstudy, 1).split(" ");
+                int dayIdx = date.getDayOfWeek().getValue() - 1;
+                if (dayIdx < weekSelfStudy.length) {
+                    selfStudy = weekSelfStudy[dayIdx];
+                }
+            } catch (java.io.IOException ignored) {
+                // 读取失败视为无自习科目
+            }
             base = base.trim();
-            base = base.isEmpty() ? "~" : base + " ~";
+            if (selfStudy.isEmpty() || "\\".equals(selfStudy)) {
+                base = base.isEmpty() ? "~" : base + " ~";
+            } else {
+                base = base.isEmpty() ? "| " + selfStudy + " ~" : base + " | " + selfStudy + " ~";
+            }
         }
 
         // 课表模式：先应用换课数据文件（data/swap.txt），再 dryRun 执行 load.txt
@@ -883,7 +882,8 @@ public class MainFrame extends JFrame implements ActionListener {
                         display = Main.iifr != null ? Main.iifr.get("|") : "|";
                         break;
                     case "~":
-                        display = Main.iifr != null ? Main.iifr.get("~") : "晚自习";
+                        // 与主课条 paint 一致：晚自习标记 ~ 压缩为空白（自习科目已单独显示）
+                        display = "";
                         break;
                     default:
                         display = abbr;
@@ -1625,6 +1625,7 @@ public class MainFrame extends JFrame implements ActionListener {
             this.section = section;
             this.timeIndex = timeIndex;
             setOpaque(false);
+            setPreferredSize(new Dimension(70, 50));
             setLayout(new BorderLayout(0, 1));
 
             JLabel timeLabel = new JLabel(
@@ -1694,7 +1695,7 @@ public class MainFrame extends JFrame implements ActionListener {
             JTextField sField = new JTextField(defS, 5);
             JTextField eField = new JTextField(defE, 5);
             Object[] msg = {"开始时间（HH:mm）", sField, "结束时间（HH:mm）", eField};
-            int r = JOptionPane.showConfirmDialog(MainFrame.this,
+            int r = JOptionPane.showConfirmDialog(MainFrame.this, msg,
                     "插入时间段", JOptionPane.OK_CANCEL_OPTION);
             if (r != JOptionPane.OK_OPTION) return;
             String s = sField.getText().trim();
@@ -1978,11 +1979,10 @@ public class MainFrame extends JFrame implements ActionListener {
     /**
      * 执行临时换课：将两个选中单元格的课程互换。
      *
-     * <p>换课以数据文件形式写入 {@code data/swap.txt}，每条记录自包含：
-     * {@code yyyy@mm@dd@课程序号@换课名称}。选中 a、b 两格互换时写入两条记录——
-     * a 位序号替换为 b 当前课程、b 位序号替换为 a 当前课程。写入经
-     * {@link Main#upsertSwapRecord} 处理：同日期同学号的旧记录自动覆盖，
-     * 不添加任何注释行。</p>
+     * <p>换课以<b>数据文件</b>形式追加到 {@code data/swap.txt}（两行一组，每行
+     * {@code yyyy@mm@dd@名}，名 = 课程全称）：记录两门课<b>当前</b>所在日期与名称，
+     * 应用时按名称定位课表 token（含课间等全部 token）互换。追加而非覆盖——
+     * 再次点击同一对（此时显示已互换后的名称）写入新记录即可换回。</p>
      */
     private void applySwap() {
         if (swap[1] == null) {
@@ -2010,19 +2010,21 @@ public class MainFrame extends JFrame implements ActionListener {
             return;
         }
 
-        // 记录格式：yyyy@mm@dd@课程序号@换课名称（名 = 全称，无映射时用显示名）
-        // a 位置换成 b 的课、b 位置换成 a 的课；upsert 自动覆盖同位点旧记录、不加注释
+        // 换课数据文件：两行一组，yyyy@mm@dd@名（名 = 全称，无映射时用显示名）
+        String dateA = String.format("%04d@%02d@%02d", pa[0], pa[1], pa[2]);
+        String dateB = String.format("%04d@%02d@%02d", pb[0], pb[1], pb[2]);
         String nameA = Main.tokenToFullName(a.course);
         String nameB = Main.tokenToFullName(b.course);
-        String recA = String.format("%04d@%02d@%02d@%d@%s", pa[0], pa[1], pa[2], pa[3], nameB);
-        String recB = String.format("%04d@%02d@%02d@%d@%s", pb[0], pb[1], pb[2], pb[3], nameA);
+        StringBuilder sb = new StringBuilder();
+        sb.append("# 窗口换课 ").append(dateA).append(" ⇄ ").append(dateB).append('\n');
+        sb.append(dateA).append('@').append(nameA).append('\n');
+        sb.append(dateB).append('@').append(nameB).append('\n');
 
         if (!Main.swapFile.getParentFile().exists()) {
             Main.swapFile.getParentFile().mkdirs();
         }
-        try {
-            Main.upsertSwapRecord(recA);
-            Main.upsertSwapRecord(recB);
+        try (FileWriter fw = new FileWriter(Main.swapFile, StandardCharsets.UTF_8, true)) {
+            fw.write(sb.toString());
         } catch (IOException e) {
             Main.outputException(e);
             return;

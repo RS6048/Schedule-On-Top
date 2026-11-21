@@ -33,7 +33,7 @@ import javax.swing.SwingUtilities;
  * 与整体更新流程——不会因单条过期清单条目而更新失败。</p>
  *
  * <p>镜像配置：镜像<b>保留完整地址头</b>（存于 {@code data/.local} 第 6 行，如
- * {@code https://ghproxy.net}、 {@code gitee.com}）——仓库信息
+ * {@code https://ghproxy.net}、{@code gitee.com}）——仓库信息
  * （{@code RS6048/Schedule-On-Top/main}）在下载时由程序自动追加，
  * 无需在输入框填写完整 URL。镜像值一旦改变立即保存（无需保存按钮）；
  * 留空 = 默认 GitHub raw 直连。使用默认地址失败时自动依次尝试常见镜像前缀。</p>
