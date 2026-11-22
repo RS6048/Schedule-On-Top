@@ -1993,8 +1993,9 @@ public class MainFrame extends JFrame implements ActionListener {
      *
      * <p>换课以<b>数据文件</b>形式写入 {@code data/swap.txt}，每行
      * {@code yyyy@MM@DD@Token@name}：Token 为该单元格在当天课表 token 中的下标
-     * （含课间 {@code |} 等全部 token），name 为另一门课的名称。两行分别记录
-     * “A 位显示 B 课”“B 位显示 A 课”；同一位置重复换课时，后写记录会覆盖前一条。</p>
+     * （含课间等全部 token），name 为 {@code full_name.txt} 的 key（单字符，如 {@code 语}）。
+     * 两行分别记录“A 位显示 B 课”“B 位显示 A 课”；同一位置重复换课时，
+     * 后写记录会覆盖前一条。</p>
      */
     private void applySwap() {
         if (swap[1] == null) {
@@ -2022,11 +2023,11 @@ public class MainFrame extends JFrame implements ActionListener {
             return;
         }
 
-        // 换课数据文件：yyyy@MM@DD@Token@name（Token = 当天课表 token 下标，课间也占位）
+        // 换课数据文件：yyyy@MM@DD@Token@name（name = full_name 的 key，单字符）
         String keyA = String.format("%04d@%02d@%02d@%d", pa[0], pa[1], pa[2], pa[3]);
         String keyB = String.format("%04d@%02d@%02d@%d", pb[0], pb[1], pb[2], pb[3]);
-        String nameA = Main.tokenToFullName(a.course);
-        String nameB = Main.tokenToFullName(b.course);
+        String nameA = Main.displayToKey(a.course);
+        String nameB = Main.displayToKey(b.course);
         StringBuilder sb = new StringBuilder();
         sb.append("# 窗口换课 ").append(keyA).append(" ⇄ ").append(keyB).append('\n');
         sb.append(keyA).append('@').append(nameB).append('\n');

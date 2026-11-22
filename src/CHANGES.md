@@ -27,14 +27,19 @@
 
 ### 5. 换课数据文件改为五段 Token 格式（data/swap.txt）
 - 格式由「两行一组 `yyyy@mm@dd@名`」改为「一行一条 `yyyy@MM@DD@Token@name`」：
-  `Token` 为当天课表 token 下标（**从 0 开始，课间 `|`、空位 `\` 均占下标**），
-  `name` 为要显示在该位置的课程
+  `Token` 为当天课表 token 下标（**从 0 开始，课间、午饭 `|`、空位 `\` 均占下标**）
+- `name` 改取 `full_name.txt` 中的 **key（单字符，如 `语`/`数`/`|`）**，不再写两字全称；
+  误写全称（如 `语文`）时读取阶段反查并归一化为 key，既非单字符又查不到全称的记录判为非法
+- **`name` 为空格（或留空）= 课间**：按 full_name 中 `" "` 的 key 处理，应用时保留空 token
+  占位，不挤掉相邻课程
 - 同一日期同一 Token 重复出现时**后写覆盖先写**（`LinkedHashMap` 覆盖语义）；
-  读取完成后按日期、Token 排序，以映射**覆盖回写** `data/swap.txt`（去注释/空行/重复）
+  读取完成后按日期、Token 排序，以映射**覆盖回写** `data/swap.txt`（去注释/空行/重复、
+  全称归一为 key）
 - 换课只在 `reload()` 中执行一次：`refreshSwapMap()` 重建映射 → 按 Token 下标替换到
   临时课表；不回写 `schedule.txt`，`MainFrame` 预览仍读取同一内存映射
 - 旧版四段记录无法确定 Token，读取时跳过并在 stderr 提示
-- `Main.ensureConfigFiles()` 的 swap.txt 模板与 `MainFrame.applySwap()` 写入格式同步更新
+- `Main.ensureConfigFiles()` 的 swap.txt 模板、`SWAP_HEADER` 与 `MainFrame.applySwap()`
+  写入格式同步更新（GUI 用 `displayToKey` 写单字符 key）
 - 删除 `SwapLine` / `parseSwapLine` / `findSwapToken`（按名称线性定位的旧逻辑）
 
 ---

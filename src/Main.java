@@ -365,7 +365,8 @@ public class Main {
             writeFile(swapFile, SWAP_HEADER + """
                     #
                     # 示例：2026年9月30日第2节（下标 1）改为数学
-                    # 2026@09@30@1@数学
+                    # 2026@09@30@1@数
+                    # 该位置改为课间：2026@09@30@1@ 
                     """);
         }
 
@@ -445,8 +446,8 @@ public class Main {
     /** swap.txt 统一表头（新建模板与每次 reload 归一化回写共用）。 */
     private static final String SWAP_HEADER = """
             # 换课记录：每行 yyyy@MM@DD@Token@name
-            # Token = 当天课表 token 下标（从 0 开始，课间 | 也占一个下标）
-            # name = 课程全称（如 语文）或简称（如 语）
+            # Token = 当天课表 token 下标（从 0 开始，课间也占一个下标）
+            # name = full_name.txt 中的 key（单字符，如 语）；name 为空格表示课间
             # 同一日期同一 Token 重复出现时，后写的记录覆盖先写的
             """;
 
@@ -460,11 +461,12 @@ public class Main {
     /**
      * 读取 swap.txt 并归一化（仅 reload 时调用一次）。
      *
-     * <p>每行 {@code yyyy@MM@DD@Token@name}；同一“日期 + Token”重复出现时，
-     * 后写的记录覆盖先写的（HashMap put）。读取完成后立即用该映射重写整个文件：
-     * 去掉注释/空行/重复项，按日期、Token 升序输出，之后运行时只用内存映射，
-     * 不再逐次读文件。旧版 4 段格式（{@code yyyy@mm@dd@名}）无法确定 Token，
-     * 会被忽略并打印提示。</p>
+     * <p>每行 {@code yyyy@MM@DD@Token@name}；{@code name} 取 {@code full_name.txt}
+     * 的 key（单字符，如 {@code 语}），写成空格表示课间；若误写全称（如 {@code 语文}），
+     * 读取时反查并归一化为对应 key。同一“日期 + Token”重复出现时，后写的记录覆盖先写的
+     * （HashMap put）。读取完成后立即用该映射重写整个文件：去掉注释/空行/重复项，
+     * 按日期、Token 升序输出，之后运行时只用内存映射，不再逐次读文件。旧版 4 段格式
+     * （{@code yyyy@mm@dd@名}）无法确定 Token，会被忽略并打印提示。</p>
      *
      * @throws IOException 读取或回写失败时抛出
      */
@@ -490,8 +492,8 @@ public class Main {
                         LocalDate d = LocalDate.of(Integer.parseInt(p[0].trim()),
                                 Integer.parseInt(p[1].trim()), Integer.parseInt(p[2].trim()));
                         int token = Integer.parseInt(p[3].trim());
-                        String name = p[4].trim();
-                        if (token < 0 || name.isEmpty()) {
+                        String name = resolveSwapName(p[4]);
+                        if (token < 0 || name == null) {
                             invalid++;
                             continue;
                         }
@@ -555,14 +557,70 @@ public class Main {
             if (!k.date().equals(date) || k.token() < 0 || k.token() >= arr.length) {
                 continue;
             }
-            String token = fullNameToToken(e.getValue());
-            if (token.isEmpty() || token.equals(arr[k.token()])) {
+            String token = e.getValue();
+            String cell = token == null || token.isEmpty() ? "" : token;
+            if (" ".equals(cell)) {
+                cell = ""; // 课间：写回空 token，join 后形成双空格占位，不挤掉相邻课程
+            }
+            if (cell.equals(arr[k.token()])) {
                 continue;
             }
-            arr[k.token()] = token;
+            arr[k.token()] = cell;
             changed = true;
         }
         return changed ? String.join(" ", arr) : sched;
+    }
+
+    /**
+     * 把 swap.txt 中的 {@code name} 解析为 {@code full_name.txt} 的 key（单字符 token）。
+     *
+     * <p>规则：字段为空格或空 → 课间（内部用单个空格 {@code " "} 表示，写回课表时
+     * 保留双空格占位）；单字符直接作为 key；多字符若命中 full_name 的某个全称
+     * （如 {@code 语文}）则反查为 key（{@code 语}）；其余多字符视为非法返回 {@code null}。</p>
+     *
+     * @param raw swap.txt 第 5 段原文
+     * @return 单字符 key / 单个空格（课间）/ {@code null}（非法）
+     */
+    public static String resolveSwapName(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return " "; // 空格 = 课间
+        }
+        String n = raw.trim();
+        if (iifr != null) {
+            if (iifr.get(n) != null) {
+                return n;
+            }
+            for (Map.Entry<String, String> e : iifr.asMap().entrySet()) {
+                if (n.equals(e.getValue())) {
+                    return e.getKey() == null || e.getKey().isEmpty() ? " " : e.getKey();
+                }
+            }
+        }
+        return n.length() == 1 ? n : null;
+    }
+
+    /**
+     * 显示名 → {@code full_name.txt} 的 key（单字符）。GUI 写 swap.txt 时使用。
+     *
+     * @param display 单元格显示文本（简称或全称）
+     * @return 单字符 key；课间/空位返回 {@code " "} 或原值
+     */
+    public static String displayToKey(String display) {
+        String d = display == null ? "" : display;
+        if (d.isEmpty()) {
+            return " ";
+        }
+        if (iifr != null) {
+            if (iifr.get(d) != null) {
+                return d;
+            }
+            for (Map.Entry<String, String> e : iifr.asMap().entrySet()) {
+                if (d.equals(e.getValue())) {
+                    return e.getKey() == null || e.getKey().isEmpty() ? " " : e.getKey();
+                }
+            }
+        }
+        return d;
     }
 
     /**
