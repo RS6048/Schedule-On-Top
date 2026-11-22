@@ -25,6 +25,18 @@
   共享同一上下文；后续 reload 不再重复
 - 纳入脚本缓存：`refreshScriptCache()` 读取并 `validateAndCache`，合并到 `cachedStartupScript`
 
+### 5. 换课数据文件改为五段 Token 格式（data/swap.txt）
+- 格式由「两行一组 `yyyy@mm@dd@名`」改为「一行一条 `yyyy@MM@DD@Token@name`」：
+  `Token` 为当天课表 token 下标（**从 0 开始，课间 `|`、空位 `\` 均占下标**），
+  `name` 为要显示在该位置的课程
+- 同一日期同一 Token 重复出现时**后写覆盖先写**（`LinkedHashMap` 覆盖语义）；
+  读取完成后按日期、Token 排序，以映射**覆盖回写** `data/swap.txt`（去注释/空行/重复）
+- 换课只在 `reload()` 中执行一次：`refreshSwapMap()` 重建映射 → 按 Token 下标替换到
+  临时课表；不回写 `schedule.txt`，`MainFrame` 预览仍读取同一内存映射
+- 旧版四段记录无法确定 Token，读取时跳过并在 stderr 提示
+- `Main.ensureConfigFiles()` 的 swap.txt 模板与 `MainFrame.applySwap()` 写入格式同步更新
+- 删除 `SwapLine` / `parseSwapLine` / `findSwapToken`（按名称线性定位的旧逻辑）
+
 ---
 
 ## v1.4.0 — 编辑课表界面重设计（内嵌编辑表格）

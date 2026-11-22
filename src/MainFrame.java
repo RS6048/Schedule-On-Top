@@ -1991,10 +1991,10 @@ public class MainFrame extends JFrame implements ActionListener {
     /**
      * 执行临时换课：将两个选中单元格的课程互换。
      *
-     * <p>换课以<b>数据文件</b>形式追加到 {@code data/swap.txt}（两行一组，每行
-     * {@code yyyy@mm@dd@名}，名 = 课程全称）：记录两门课<b>当前</b>所在日期与名称，
-     * 应用时按名称定位课表 token（含课间等全部 token）互换。追加而非覆盖——
-     * 再次点击同一对（此时显示已互换后的名称）写入新记录即可换回。</p>
+     * <p>换课以<b>数据文件</b>形式写入 {@code data/swap.txt}，每行
+     * {@code yyyy@MM@DD@Token@name}：Token 为该单元格在当天课表 token 中的下标
+     * （含课间 {@code |} 等全部 token），name 为另一门课的名称。两行分别记录
+     * “A 位显示 B 课”“B 位显示 A 课”；同一位置重复换课时，后写记录会覆盖前一条。</p>
      */
     private void applySwap() {
         if (swap[1] == null) {
@@ -2005,7 +2005,7 @@ public class MainFrame extends JFrame implements ActionListener {
         UnitPane a = swap[0];
         UnitPane b = swap[1];
 
-        // 排除课间与空位（第一节课是真实课程，允许参与换课）
+        // 排除课间与空位（课间/空位不可作为换课目标；下标计算时它们仍占位）
         String breakName = Main.iifr != null ? Main.iifr.get("|") : "|";
         if (a.course.isEmpty() || a.course.equals(breakName)
                 || b.course.isEmpty() || b.course.equals(breakName)) {
@@ -2022,15 +2022,15 @@ public class MainFrame extends JFrame implements ActionListener {
             return;
         }
 
-        // 换课数据文件：两行一组，yyyy@mm@dd@名（名 = 全称，无映射时用显示名）
-        String dateA = String.format("%04d@%02d@%02d", pa[0], pa[1], pa[2]);
-        String dateB = String.format("%04d@%02d@%02d", pb[0], pb[1], pb[2]);
+        // 换课数据文件：yyyy@MM@DD@Token@name（Token = 当天课表 token 下标，课间也占位）
+        String keyA = String.format("%04d@%02d@%02d@%d", pa[0], pa[1], pa[2], pa[3]);
+        String keyB = String.format("%04d@%02d@%02d@%d", pb[0], pb[1], pb[2], pb[3]);
         String nameA = Main.tokenToFullName(a.course);
         String nameB = Main.tokenToFullName(b.course);
         StringBuilder sb = new StringBuilder();
-        sb.append("# 窗口换课 ").append(dateA).append(" ⇄ ").append(dateB).append('\n');
-        sb.append(dateA).append('@').append(nameA).append('\n');
-        sb.append(dateB).append('@').append(nameB).append('\n');
+        sb.append("# 窗口换课 ").append(keyA).append(" ⇄ ").append(keyB).append('\n');
+        sb.append(keyA).append('@').append(nameB).append('\n');
+        sb.append(keyB).append('@').append(nameA).append('\n');
 
         if (!Main.swapFile.getParentFile().exists()) {
             Main.swapFile.getParentFile().mkdirs();

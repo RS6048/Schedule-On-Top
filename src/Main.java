@@ -360,16 +360,12 @@ public class Main {
                     endif
                     """);
         }
-        // swap.txt（data/）：换课数据文件，两行一组构成一次换课；不存在则自动创建说明模板
+        // swap.txt（data/）：换课数据文件，每行 yyyy@MM@DD@Token@name；不存在则自动创建说明模板
         if (!swapFile.exists()) {
-            writeFile(swapFile, """
-                    # 换课记录：两行一组构成一次换课，每行格式 yyyy@mm@dd@名
-                    # 名 = 课程全称（如 语文/数学/恰饭）或简称（如 语/数）；按课表 token 定位，
-                    # 位置含全部 token（第一节课与课间 | 等均计入）
+            writeFile(swapFile, SWAP_HEADER + """
                     #
-                    # 示例：9月30日第2节（数学）与 10月1日第3节（语文）互换
-                    # 2026@09@30@数学
-                    # 2026@10@01@语文
+                    # 示例：2026年9月30日第2节（下标 1）改为数学
+                    # 2026@09@30@1@数学
                     """);
         }
 
@@ -446,96 +442,127 @@ public class Main {
 
     // ===== 换课数据文件（data/swap.txt）=====
 
-    /** 换课记录：日期 + 课程名（全称或简称）。 */
-    private record SwapLine(LocalDate date, String name) {
+    /** swap.txt 统一表头（新建模板与每次 reload 归一化回写共用）。 */
+    private static final String SWAP_HEADER = """
+            # 换课记录：每行 yyyy@MM@DD@Token@name
+            # Token = 当天课表 token 下标（从 0 开始，课间 | 也占一个下标）
+            # name = 课程全称（如 语文）或简称（如 语）
+            # 同一日期同一 Token 重复出现时，后写的记录覆盖先写的
+            """;
+
+    /** 换课键：日期 + 课表 token 下标（含课间 | 等全部 token，0 起）。 */
+    private record SwapKey(LocalDate date, int token) {
+    }
+
+    /** 归一化后的换课映射（同一 Token 后写覆盖先写）；仅 reload 时重建。 */
+    private static volatile Map<SwapKey, String> swapMap = new LinkedHashMap<>();
+
+    /**
+     * 读取 swap.txt 并归一化（仅 reload 时调用一次）。
+     *
+     * <p>每行 {@code yyyy@MM@DD@Token@name}；同一“日期 + Token”重复出现时，
+     * 后写的记录覆盖先写的（HashMap put）。读取完成后立即用该映射重写整个文件：
+     * 去掉注释/空行/重复项，按日期、Token 升序输出，之后运行时只用内存映射，
+     * 不再逐次读文件。旧版 4 段格式（{@code yyyy@mm@dd@名}）无法确定 Token，
+     * 会被忽略并打印提示。</p>
+     *
+     * @throws IOException 读取或回写失败时抛出
+     */
+    public static void refreshSwapMap() throws IOException {
+        Map<SwapKey, String> map = new LinkedHashMap<>();
+        if (swapFile.exists() && swapFile.isFile()) {
+            int legacy = 0;
+            int invalid = 0;
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(new FileInputStream(swapFile), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    String t = line.trim();
+                    if (t.isEmpty() || t.startsWith("#")) {
+                        continue;
+                    }
+                    String[] p = t.split("@", 5);
+                    if (p.length < 5) {
+                        legacy++;
+                        continue;
+                    }
+                    try {
+                        LocalDate d = LocalDate.of(Integer.parseInt(p[0].trim()),
+                                Integer.parseInt(p[1].trim()), Integer.parseInt(p[2].trim()));
+                        int token = Integer.parseInt(p[3].trim());
+                        String name = p[4].trim();
+                        if (token < 0 || name.isEmpty()) {
+                            invalid++;
+                            continue;
+                        }
+                        map.put(new SwapKey(d, token), name); // 后写覆盖先写
+                    } catch (RuntimeException e) {
+                        invalid++;
+                    }
+                }
+            }
+            if (legacy > 0) {
+                System.err.println("[swap] 忽略旧格式（4 段，缺少 Token）记录 " + legacy + " 条");
+            }
+            if (invalid > 0) {
+                System.err.println("[swap] 忽略格式非法记录 " + invalid + " 条");
+            }
+        }
+        swapMap = map;
+        writeSwapMap(map);
     }
 
     /**
-     * 应用 data/swap.txt 中的换课记录到课表字符串。
+     * 用归一化后的映射覆盖 swap.txt（表头 + 按日期、Token 升序的记录）。
      *
-     * <p>文件格式：每行 {@code yyyy@mm@dd@名}，<b>两行一组</b>构成一次换课；
-     * 名 = 课程全称（如 {@code 语文}）或简称（如 {@code 语}）。应用时按名称定位
-     * 课表 token（第一节课与课间 {@code |}、空位 {@code \} 等全部 token 均计入位置），
-     * 将两门课互换；仅处理目标日期匹配的记录。</p>
+     * @param map 换课映射
+     * @throws IOException 写入失败时抛出
+     */
+    private static void writeSwapMap(Map<SwapKey, String> map) throws IOException {
+        if (!swapFile.getParentFile().exists()) {
+            swapFile.getParentFile().mkdirs();
+        }
+        List<SwapKey> keys = new ArrayList<>(map.keySet());
+        keys.sort(Comparator.comparing(SwapKey::date).thenComparingInt(SwapKey::token));
+        StringBuilder sb = new StringBuilder(SWAP_HEADER);
+        for (SwapKey k : keys) {
+            sb.append(String.format("%04d@%02d@%02d@%d@%s%n", k.date().getYear(),
+                    k.date().getMonthValue(), k.date().getDayOfMonth(), k.token(), map.get(k)));
+        }
+        writeFile(swapFile, sb.toString());
+    }
+
+    /**
+     * 应用内存中的换课映射到课表字符串（仅在 reload 时作用于临时课表）。
+     *
+     * <p>按 {@code 日期 + Token} 精确替换：Token 为课表空白分隔后的下标，
+     * 课间 {@code |}、空位 {@code \} 等同样各占一个下标，因此“第 N 节”不会因课间错位。
+     * 只处理与目标日期匹配的记录；未命中或 Token 越界时保持原样。</p>
      *
      * @param sched 课表文本（空格分隔）
      * @param date  目标日期
-     * @return 应用换课后的课表文本；无匹配或读取失败时返回原样
-     * @throws IOException 读取换课文件失败时抛出
+     * @return 应用换课后的课表文本
+     * @throws IOException 保留签名（本方法不再读写文件）
      */
     public static String applySwapFile(String sched, LocalDate date) throws IOException {
-        if (sched == null || date == null || swapFile == null || !swapFile.exists()) {
-            return sched;
-        }
-        List<SwapLine> lines = new ArrayList<>();
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(new FileInputStream(swapFile), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                String t = line.trim();
-                if (t.isEmpty() || t.startsWith("#")) {
-                    continue;
-                }
-                SwapLine sl = parseSwapLine(t);
-                if (sl != null) {
-                    lines.add(sl);
-                }
-            }
-        }
-        if (lines.isEmpty()) {
+        if (sched == null || date == null || sched.trim().isEmpty() || swapMap.isEmpty()) {
             return sched;
         }
         String[] arr = SScriptInterpreter.stripFormat(sched).split(" ");
         boolean changed = false;
-        for (int i = 0; i + 1 < lines.size(); i += 2) {
-            SwapLine l1 = lines.get(i);
-            SwapLine l2 = lines.get(i + 1);
-            if (l1.date.equals(date)) {
-                int p = findSwapToken(arr, l1.name);
-                if (p >= 0) {
-                    arr[p] = fullNameToToken(l2.name);
-                    changed = true;
-                }
+        for (Map.Entry<SwapKey, String> e : swapMap.entrySet()) {
+            SwapKey k = e.getKey();
+            if (!k.date().equals(date) || k.token() < 0 || k.token() >= arr.length) {
+                continue;
             }
-            if (l2.date.equals(date)) {
-                int p = findSwapToken(arr, l2.name);
-                if (p >= 0) {
-                    arr[p] = fullNameToToken(l1.name);
-                    changed = true;
-                }
+            String token = fullNameToToken(e.getValue());
+            if (token.isEmpty() || token.equals(arr[k.token()])) {
+                continue;
             }
+            arr[k.token()] = token;
+            changed = true;
         }
         return changed ? String.join(" ", arr) : sched;
-    }
-
-    /** 解析换课行 {@code yyyy@mm@dd@名}；格式非法返回 null。 */
-    private static SwapLine parseSwapLine(String line) {
-        String[] p = line.split("@", 4);
-        if (p.length < 4) {
-            return null;
-        }
-        try {
-            int y = Integer.parseInt(p[0].trim());
-            int m = Integer.parseInt(p[1].trim());
-            int d = Integer.parseInt(p[2].trim());
-            String name = p[3].trim();
-            if (name.isEmpty()) {
-                return null;
-            }
-            return new SwapLine(LocalDate.of(y, m, d), name);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /** 在课表 token 数组中定位名称（全称或简称均可）的索引；未找到返回 -1。 */
-    private static int findSwapToken(String[] arr, String name) {
-        for (int i = 0; i < arr.length; i++) {
-            if (tokenToFullName(arr[i]).equals(name) || arr[i].equals(name)) {
-                return i;
-            }
-        }
-        return -1;
     }
 
     /**
@@ -665,10 +692,11 @@ public class Main {
                 cont = new String[]{baseSchedule, duty};
             }
 
-            // 换课数据文件（data/swap.txt，yyyy@mm@dd@名，两行一组）在基础课表之上应用。
-            // 位置按课表 token 定位（含课间 | 等全部 token）；换课作用于延迟课表之后、
-            // load.txt 脚本之前，与旧版「load.txt 末尾 run swap.txt」的生效顺序一致。
+            // 换课数据文件（data/swap.txt，yyyy@MM@DD@Token@name）在基础课表之上应用：
+            // 本方法只在 reload() 调用一次，先读入归一化映射（同名 Token 后写覆盖），
+            // 再按 Token 下标替换，只改内存里的临时课表，不回写 schedule.txt。
             try {
+                refreshSwapMap();
                 baseSchedule = applySwapFile(baseSchedule, today);
                 cont = new String[]{baseSchedule, duty};
             } catch (IOException e) {

@@ -1,6 +1,6 @@
 {
   "version": "1.8.3",
-  "note": "版本号升至 1.8.3；新增日志功能（输出到根目录 log/，设置面板“开启log”默认关闭，过时日志自动压缩为 .gz）；新增重启入口 run.bat 与编译打包脚本 createJar.bat，缺失时程序自动创建，更新时自动调用；新增命令文件 startup.txt（与 load.txt/tick.txt 地位等价，每个进程生命周期仅首次启动执行 1 次）",
+  "note": "换课文件 data/swap.txt 改为五段格式 yyyy@MM@DD@Token@name：Token 为当天课表下标（从 0 开始，课间 | 也占一位），同一日期同一 Token 后写覆盖先写，读取后按映射覆盖回写文件，仅在 reload 时应用到临时课表，不改 schedule.txt；版本号升至 1.8.3；新增日志功能（输出到根目录 log/，设置面板“开启log”默认关闭，过时日志自动压缩为 .gz）；新增重启入口 run.bat 与编译打包脚本 createJar.bat，缺失时程序自动创建，更新时自动调用；新增命令文件 startup.txt（与 load.txt/tick.txt 地位等价，每个进程生命周期仅首次启动执行 1 次）",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
