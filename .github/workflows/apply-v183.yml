@@ -1,0 +1,33 @@
+name: apply-v183
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v183.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Download payload
+        run: curl -L --fail -o /tmp/v183.zip "https://aka.doubaocdn.com/s/N7hDugIuHE"
+      - name: Unzip payload
+        run: unzip -o /tmp/v183.zip -d .
+      - name: Remove old fragments and workflow
+        run: |
+          rm -rf .replace
+          rm -f .github/workflows/apply-v183.yml
+      - name: Commit and push
+        run: |
+          git config user.name "RS6048"
+          git config user.email "rs6048@qq.com"
+          git add -A
+          git commit -m "v1.8.3: add log / createJar.bat / run.bat / startup.txt"
+          git push origin HEAD:main
