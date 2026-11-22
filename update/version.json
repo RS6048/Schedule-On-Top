@@ -16,8 +16,6 @@
     "src/UpdateChecker.java",
     "src/Log.java",
     "src/META-INF/MANIFEST.MF",
-    "BuildJar.bat",
-    "createJar.bat",
-    "run.bat"
+    "BuildJar.bat"
   ]
 }
