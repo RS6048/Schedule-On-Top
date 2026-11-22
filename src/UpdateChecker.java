@@ -25,8 +25,9 @@ import javax.swing.SwingUtilities;
  *
  * <p>从远程仓库（GitHub raw 或国内镜像）拉取 {@code update/version.json}，
  * 与内置（硬编码）版本号比对；有新版时<b>按远端 version.json 的 files 清单</b>
- * 下载文件覆盖本地源码（本地文件不参与文件列表的生成），并尝试用 javac 重新编译到
- * {@code out/production/ScrollSched}（IDEA 输出布局）。更新后需重启程序生效。</p>
+ * 下载文件覆盖本地源码（本地文件不参与文件列表的生成），再调用根目录
+ * {@code createJar.bat} 编译打包（{@code out/production/ScrollSched} → {@code sc.jar}），
+ * 完成后调用 {@code run.bat} 重启。两个 bat 缺失时均自动创建。</p>
  *
  * <p>清单容错：若远端清单中残留了新版本已删除的旧文件（如历史上的
  * {@code src/CommentWindow.java}），下载时该文件返回 404 会被跳过，不影响其余文件
@@ -58,7 +59,7 @@ public class UpdateChecker {
     };
 
     /** 当前程序版本（硬编码于源码，与推送的 version.json 一致；不使用 version.txt）。 */
-    public static final String LOCAL_VERSION = "1.8.0";
+    public static final String LOCAL_VERSION = "1.8.3";
 
     /** 最近一次成功请求使用的 base（下载更新文件时复用）。 */
     private static String lastWorkingBase = null;
@@ -238,34 +239,144 @@ public class UpdateChecker {
         }
     }
 
+    /** 重启脚本（程序根目录，缺失时自动创建）。 */
+    public static final String RUN_BAT = "run.bat";
+
+    /** 编译打包脚本（程序根目录，缺失时自动创建）。 */
+    public static final String CREATE_JAR_BAT = "createJar.bat";
+
+    /** run.bat 默认内容（缺失时自动创建；纯 ASCII，避免 cmd 代码页解析问题）。 */
+    private static final String RUN_BAT_CONTENT = """
+            @echo off
+            cd /d %~dp0
+            rem Prefer the packaged sc.jar (auto update removes src/out after packaging)
+            if exist "sc.jar" (
+                start "ScrollSched" java -Dfile.encoding=UTF-8 -jar "sc.jar"
+                exit /b 0
+            )
+            rem Fallback: run from compiled classes
+            if exist "out\\production\\ScrollSched\\Main.class" (
+                start "ScrollSched" java -Dfile.encoding=UTF-8 -cp "out\\production\\ScrollSched" Main
+                exit /b 0
+            )
+            echo [ERROR] sc.jar or out\\production\\ScrollSched\\Main.class not found.
+            echo Run createJar.bat to build and package first.
+            pause
+            exit /b 1
+            """;
+
+    /** createJar.bat 默认内容（缺失时自动创建；编译 src/*.java 并打包 sc.jar）。 */
+    private static final String CREATE_JAR_BAT_CONTENT = """
+            @echo off
+            cd /d %~dp0
+            rem Called by the program when a build/package is needed (auto update, rebuild).
+            rem Compiles src\\*.java into out\\production\\ScrollSched, then packages sc.jar.
+            setlocal
+            set "JAVAC="
+            set "JAR="
+            if defined JAVA_HOME if exist "%JAVA_HOME%\\bin\\javac.exe" (
+                set "JAVAC=%JAVA_HOME%\\bin\\javac.exe"
+                set "JAR=%JAVA_HOME%\\bin\\jar.exe"
+            )
+            if not defined JAVAC for /d %%D in ("%ProgramFiles%\\Java\\jdk*") do (
+                if exist "%%D\\bin\\javac.exe" (
+                    set "JAVAC=%%D\\bin\\javac.exe"
+                    set "JAR=%%D\\bin\\jar.exe"
+                )
+            )
+            if not defined JAVAC for /d %%D in ("%ProgramFiles%\\Eclipse Adoptium\\jdk*") do (
+                if exist "%%D\\bin\\javac.exe" (
+                    set "JAVAC=%%D\\bin\\javac.exe"
+                    set "JAR=%%D\\bin\\jar.exe"
+                )
+            )
+            if not defined JAVAC (
+                javac -version >nul 2>&1
+                if not errorlevel 1 (
+                    set "JAVAC=javac"
+                    set "JAR=jar"
+                )
+            )
+            if not defined JAVAC (
+                echo [ERROR] javac not found. Install a JDK or set JAVA_HOME.
+                exit /b 2
+            )
+            if not exist "src" (
+                echo [ERROR] src directory not found.
+                exit /b 2
+            )
+            if not exist "out\\production\\ScrollSched" mkdir "out\\production\\ScrollSched"
+            "%JAVAC%" -encoding UTF-8 -d "out\\production\\ScrollSched" src\\*.java
+            if errorlevel 1 (
+                echo [ERROR] javac compilation failed.
+                exit /b 1
+            )
+            "%JAR%" cfe sc.jar Main -C "out\\production\\ScrollSched" .
+            if errorlevel 1 (
+                echo [ERROR] jar packaging failed.
+                exit /b 1
+            )
+            echo [OK] Compiled and packaged sc.jar
+            exit /b 0
+            """;
+
     /**
-     * 用 javac 重新编译 src 下全部源码到 out/production/ScrollSched。
+     * 返回 cmd.exe 路径：优先环境变量 ComSpec（避免 PATH 缺少 System32 时找不到 cmd）。
      *
-     * @return 编译结果描述（"编译成功" 或失败原因）
+     * @return cmd.exe 路径或回退名
      */
-    public static String recompile() {
-        File outDir = new File("out/production/ScrollSched");
-        File javac = findJavac();
-        if (javac == null) {
-            return "未找到 javac，请手动重新编译";
+    private static String cmd() {
+        String comspec = System.getenv("ComSpec");
+        return (comspec != null && !comspec.isEmpty()) ? comspec : "cmd.exe";
+    }
+
+    /**
+     * 确保根目录存在 run.bat（重启入口）；缺失时按默认内容自动创建。
+     *
+     * @return run.bat 文件
+     * @throws IOException 写入失败
+     */
+    public static File ensureRunBat() throws IOException {
+        File bat = new File(RUN_BAT);
+        if (!bat.exists()) {
+            Files.writeString(bat.toPath(), RUN_BAT_CONTENT, StandardCharsets.UTF_8);
         }
-        File srcDir = new File("src");
-        File[] srcs = srcDir.listFiles((d, n) -> n.endsWith(".java"));
-        if (srcs == null || srcs.length == 0) {
-            return "src 目录下没有 .java 文件";
+        return bat;
+    }
+
+    /**
+     * 确保根目录存在 createJar.bat（编译打包入口）；缺失时按默认内容自动创建。
+     *
+     * @return createJar.bat 文件
+     * @throws IOException 写入失败
+     */
+    public static File ensureCreateJarBat() throws IOException {
+        File bat = new File(CREATE_JAR_BAT);
+        if (!bat.exists()) {
+            Files.writeString(bat.toPath(), CREATE_JAR_BAT_CONTENT, StandardCharsets.UTF_8);
         }
-        outDir.mkdirs();
-        List<String> cmd = new ArrayList<>();
-        cmd.add(javac.getAbsolutePath());
-        cmd.add("-encoding");
-        cmd.add("UTF-8");
-        cmd.add("-d");
-        cmd.add(outDir.getAbsolutePath());
-        for (File f : srcs) {
-            cmd.add(f.getAbsolutePath());
-        }
+        return bat;
+    }
+
+    /**
+     * 调用 createJar.bat 编译并打包（不存在时先自动创建）。
+     *
+     * <p>替代原先内置的 javac/jar 调用：编译与打包逻辑统一收敛到脚本，
+     * 便于用户自行修改构建方式。</p>
+     *
+     * @return 构建结果描述（成功以 "编译打包成功" 开头）
+     */
+    public static String buildWithCreateJar() {
         try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            File bat = ensureCreateJarBat();
+            ProcessBuilder pb = new ProcessBuilder(cmd(), "/c", bat.getAbsolutePath());
+            pb.directory(new File("."));
+            pb.redirectErrorStream(true);
+            if (System.getenv("JAVA_HOME") == null || System.getenv("JAVA_HOME").isEmpty()) {
+                // 把当前 JVM 的 java.home 交给 bat，便于定位 javac/jar
+                pb.environment().put("JAVA_HOME", System.getProperty("java.home", ""));
+            }
+            Process p = pb.start();
             StringBuilder sb = new StringBuilder();
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
@@ -276,40 +387,47 @@ public class UpdateChecker {
             }
             int code = p.waitFor();
             if (code == 0) {
-                return "编译成功（out/production/ScrollSched）";
+                return "编译打包成功（createJar.bat → sc.jar）";
             }
-            return "编译失败(exit=" + code + ")：\n" + sb.toString().trim();
+            return "编译打包失败(exit=" + code + ")：\n" + sb.toString().trim();
         } catch (Exception e) {
-            return "编译失败: " + e.getMessage();
+            return "调用 createJar.bat 失败: " + e.getMessage();
         }
     }
 
-    private static File findJavac() {
-        String home = System.getProperty("java.home", "");
-        File[] candidates = {
-                new File(home, "bin/javac.exe"),
-                new File(home, "../bin/javac.exe"), // JRE 场景：java.home 指向 jre 时回退到 jdk/bin
-        };
-        for (File f : candidates) {
-            if (f.exists()) {
-                return f;
-            }
+    /**
+     * 调用 run.bat 重启程序（不存在时先自动创建），随后退出当前进程。
+     *
+     * @return 启动结果描述
+     */
+    public static String restart() {
+        try {
+            File bat = ensureRunBat();
+            // 直接执行 bat（bat 内用 start 启动新进程后自身立即返回）
+            new ProcessBuilder(cmd(), "/c", bat.getAbsolutePath())
+                    .directory(new File("."))
+                    .start();
+            // 给新进程留出启动时间，再退出当前进程
+            new Thread(() -> {
+                try {
+                    Thread.sleep(800);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+                System.exit(0);
+            }, "restart-exit").start();
+            return "已调用 run.bat 重启";
+        } catch (Exception e) {
+            return "调用 run.bat 失败: " + e.getMessage();
         }
-        String javaHome = System.getenv("JAVA_HOME");
-        if (javaHome != null && !javaHome.isEmpty()) {
-            File f = new File(javaHome, "bin/javac.exe");
-            if (f.exists()) {
-                return f;
-            }
-        }
-        return null;
     }
 
     // ===== 主流程 =====
 
     /**
      * 自动更新主流程（供后台线程调用）：检查 → 有新版则<b>弹窗由用户手动确认</b> →
-     * 确认后下载 → 重新编译 → 自动打包 jar → 提示重启生效（版本号硬编码于源码）。
+     * 确认后下载 → 调用 {@code createJar.bat} 编译打包（缺失时自动创建）→
+     * 调用 {@code run.bat} 重启（缺失时自动创建）并退出当前进程（版本号硬编码于源码）。
      *
      * <p>即“自动检测，手动确认”：发现新版不会直接下载，先弹确认框；用户选“否”则放弃本次更新。</p>
      *
@@ -361,21 +479,19 @@ public class UpdateChecker {
 
         try {
             downloadUpdate(info);
-            String compile = recompile();
-            String jarMsg = "";
-            if (compile.startsWith("编译成功")) {
-                jarMsg = packageJar();
+            String build = buildWithCreateJar();
+            boolean built = build.startsWith("编译打包成功");
+            if (built) {
                 // 打包成功后自动清理源码与编译产物（运行中的类仍在内存，重启由 sc.jar 启动）
-                if (jarMsg.startsWith("已打包")) {
-                    cleanupSources();
-                }
+                cleanupSources();
             }
             StringBuilder sb = new StringBuilder();
-            sb.append("已更新到 v").append(info.version).append("（").append(compile);
-            if (jarMsg != null && !jarMsg.isEmpty()) {
-                sb.append("；").append(jarMsg);
+            sb.append("已更新到 v").append(info.version).append("（").append(build).append("）。");
+            if (built) {
+                sb.append(' ').append(restart()).append("，请等待新窗口启动。");
+            } else {
+                sb.append(" 请手动运行 createJar.bat 后重启程序生效。");
             }
-            sb.append("）。请重启程序生效。");
             if (!info.note.isEmpty()) {
                 sb.append("\n更新说明：").append(info.note);
             }
@@ -383,76 +499,6 @@ public class UpdateChecker {
         } catch (Exception e) {
             return "更新失败: " + e.getMessage();
         }
-    }
-
-    /**
-     * 编译成功后自动打包可运行 jar：{@code jar cfe sc.jar Main -C out/production/ScrollSched .}。
-     * 打包失败（找不到 jar 工具等）不阻断主流程，仅返回描述。
-     *
-     * @return 打包结果描述
-     */
-    public static String packageJar() {
-        File outDir = new File("out/production/ScrollSched");
-        if (!outDir.exists()) {
-            return "未打包 jar：class 目录不存在";
-        }
-        File jarTool = findJar();
-        if (jarTool == null) {
-            return "未找到 jar 工具，跳过打包";
-        }
-        File target = new File("sc.jar");
-        List<String> cmd = new ArrayList<>();
-        cmd.add(jarTool.getAbsolutePath());
-        cmd.add("cfe");
-        cmd.add(target.getAbsolutePath());
-        cmd.add("Main");
-        cmd.add("-C");
-        cmd.add(outDir.getAbsolutePath());
-        cmd.add(".");
-        try {
-            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            StringBuilder sb = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    sb.append(line).append('\n');
-                }
-            }
-            int code = p.waitFor();
-            if (code == 0) {
-                return "已打包 sc.jar";
-            }
-            return "打 jar 失败(exit=" + code + ")：\n" + sb.toString().trim();
-        } catch (Exception e) {
-            return "打 jar 失败: " + e.getMessage();
-        }
-    }
-
-    /**
-     * 定位 JDK 自带的 jar 工具（与 {@link #findJavac()} 同序查找）。
-     *
-     * @return jar 可执行文件；找不到返回 null
-     */
-    private static File findJar() {
-        String home = System.getProperty("java.home", "");
-        File[] candidates = {
-                new File(home, "bin/jar.exe"),
-                new File(home, "../bin/jar.exe"),
-        };
-        for (File f : candidates) {
-            if (f.exists()) {
-                return f;
-            }
-        }
-        String javaHome = System.getenv("JAVA_HOME");
-        if (javaHome != null && !javaHome.isEmpty()) {
-            File f = new File(javaHome, "bin/jar.exe");
-            if (f.exists()) {
-                return f;
-            }
-        }
-        return null;
     }
 
     /**

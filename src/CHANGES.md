@@ -1,5 +1,32 @@
 # 悬浮课表项目 — 代码优化变更说明
 
+## v1.8.3 — 日志 / run.bat / createJar.bat / startup.txt
+
+### 1. 版本号
+- `UpdateChecker.LOCAL_VERSION` 与 `update/version.json` 同步升至 **1.8.3**
+
+### 2. 日志功能（新增 `src/Log.java`）
+- 日志输出到程序（`sc.jar`）根目录 `log/`，按天分文件 `yyyy-MM-dd.log`
+- 设置面板新增 **“开启log”** 勾选框，默认**关闭**；勾选即时生效（`Log.setEnabled`）
+- 开关持久化到 `data/.local` 第 8 行 `LogEnabled`（1=开启，0/缺失=关闭）
+- 开启时把 `System.out` / `System.err` 替换为“控制台 + 文件”的 tee 流，现有 println 自动入日志
+- 启动时自动压缩**今天之前**的 `.log` 为 `.log.gz` 并删除原文件；非法日期文件跳过
+
+### 3. 根目录脚本
+- 新增 `run.bat` 作为重启入口：优先 `sc.jar`，回退 `out/production/ScrollSched`
+- 新增 `createJar.bat`：编译 `src/*.java` 到 `out/production/ScrollSched` 并 `jar cfe sc.jar Main`
+- 两者缺失时由程序自动创建；`update` 流程改为调用 `createJar.bat` 构建、
+  成功后调用 `run.bat` 重启并退出当前进程
+- 移除 `UpdateChecker` 内置的 `recompile()` / `packageJar()` / `findJavac()` / `findJar()`
+
+### 4. startup.txt
+- 新增命令文件 `data/commands/startup.txt`，与 `load.txt` / `tick.txt` 地位等价
+- 每次**进程启动只执行 1 次**（`startupScriptDone` 标志保证），首次执行先于 `load.txt`，
+  共享同一上下文；后续 reload 不再重复
+- 纳入脚本缓存：`refreshScriptCache()` 读取并 `validateAndCache`，合并到 `cachedStartupScript`
+
+---
+
 ## v1.4.0 — 编辑课表界面重设计（内嵌编辑表格）
 
 ### 1. 设置-编辑模式改为纵向三区块

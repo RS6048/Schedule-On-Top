@@ -109,6 +109,12 @@ public class Main {
     private static volatile List<String> cachedLoadScript;
     private static volatile List<String> cachedTickScript;
 
+    /** startup.txt 缓存：整个进程生命周期只执行 1 次（首次启动、先于 load.txt）。 */
+    private static volatile List<String> cachedStartupScript;
+
+    /** startup.txt 是否已执行（保证每次进程启动只调用 1 次）。 */
+    private static volatile boolean startupScriptDone = false;
+
     /** 脚本缓存对应的日期（跨天时 tick 侧刷新一次缓存；一天至多读一次文件）。 */
     private static volatile LocalDate scriptCacheDate;
 
@@ -264,6 +270,8 @@ public class Main {
         }
         System.out.println("Preparing for initialize...");
         getLocals();
+        // 日志：配置项 LogEnabled（.local 第 8 行，默认关闭）；开启后 System.out/err 同步写入 log/
+        Log.init(getLocal("LogEnabled", 0) == 1);
         ensureConfigFiles();
 
         mw = new MainWindow();
@@ -288,6 +296,15 @@ public class Main {
             writeFile(load, """
                     # load.txt —— 每次 reload() 自动加载执行
                     # 在这里显式调用其他命令文件（不调用即忽略）。
+                    """);
+        }
+        // startup.txt：每次程序启动（整个进程生命周期只执行 1 次），先于 load.txt（不存在则自动创建）
+        File startup = new File(commandsDir, "startup.txt");
+        if (!startup.exists()) {
+            writeFile(startup, """
+                    # startup.txt —— 每次程序启动只执行 1 次（整个进程生命周期仅 1 次）
+                    # 与 load.txt / tick.txt 地位等价；首次启动时先于 load.txt 执行
+                    # 适合放只需初始化一次的变量、窗口或系统操作
                     """);
         }
         // tick.txt：每次更新循环（1s）自动执行（不存在则自动创建，仅作调度入口）
@@ -1152,8 +1169,15 @@ public class Main {
         if (tick.exists() && tick.isFile()) {
             tickLines.addAll(readScriptLines(tick));
         }
+        // startup.txt：每次进程启动只执行 1 次（首次 reload 前先于 load.txt 执行）
+        List<String> startupLines = new ArrayList<>();
+        File startup = new File(commandsDir, "startup.txt");
+        if (startup.exists() && startup.isFile()) {
+            startupLines.addAll(readScriptLines(startup));
+        }
         List<String> loadValid = validateAndCache("load.txt", loadLines);
         List<String> tickValid = validateAndCache("tick.txt", tickLines);
+        List<String> startupValid = validateAndCache("startup.txt", startupLines);
 
         // 当天手动延迟课表的 load/tick 块（仅当天生效；自动快照不参与），逐段校验
         List<String> delayLoad = new ArrayList<>();
@@ -1176,6 +1200,7 @@ public class Main {
 
         cachedLoadScript = mergeValid(loadValid, delayLoadValid);
         cachedTickScript = mergeValid(tickValid, delayTickValid);
+        cachedStartupScript = mergeValid(startupValid, null);
         scriptCacheDate = LocalDate.now();
     }
 
@@ -1214,6 +1239,31 @@ public class Main {
     }
 
     /**
+     * 执行 startup.txt（整个进程生命周期只执行 1 次）。
+     *
+     * <p>与 load.txt / tick.txt 地位等价：缓存内容来自 {@link #refreshScriptCache()}，
+     * 首次启动时先于 load.txt 执行；后续 reload()（如修改设置）不再重复执行。
+     * 使用与 load 相同的上下文，因此 startup 中设置的内容对随后的 load 可见。</p>
+     *
+     * @param ctx 首次 reload 创建的脚本上下文
+     */
+    private static void executeStartupScriptOnce(SScriptInterpreter.Context ctx) {
+        if (startupScriptDone) {
+            return;
+        }
+        startupScriptDone = true;
+        List<String> script = cachedStartupScript;
+        if (script == null || script.isEmpty()) {
+            return;
+        }
+        try {
+            new SScriptInterpreter().execute(new ArrayList<>(script), ctx);
+        } catch (Exception e) {
+            System.err.println("[脚本] startup 执行失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 在后台线程异步执行 load.txt，完成后在 EDT 上刷新主课条与换课窗口。
      * 后台执行避免 delay / cmd / 键鼠操作阻塞 EDT（幕布提示期间界面保持响应）。
      *
@@ -1222,6 +1272,8 @@ public class Main {
     private static void executeLoadScriptAsync(SScriptInterpreter.Context ctx) {
         Thread t = new Thread(() -> {
             try {
+                // startup.txt：本次进程首次启动执行且仅执行 1 次（先于 load.txt）
+                executeStartupScriptOnce(ctx);
                 executeLoadScript(ctx);
             } catch (Exception e) {
                 System.err.println("[脚本] load 执行失败: " + e.getMessage());
@@ -1349,7 +1401,7 @@ public class Main {
         locals.clear();
         if (!local.exists()) {
             local.createNewFile();
-            writeFile(local, "1\n1\n1\n1\n47\n\n1\n");
+            writeFile(local, "1\n1\n1\n1\n47\n\n1\n0\n");
         }
         try (Scanner sc = new Scanner(local, StandardCharsets.UTF_8)) {
             locals.put("WeekTurn", sc.nextInt());
@@ -1368,6 +1420,12 @@ public class Main {
                 String s = sc.nextLine().trim();
                 if ("0".equals(s) || "1".equals(s)) checkUpdateOnStart = Integer.parseInt(s);
             }
+            // 第 8 行（可选）：开启 log（1=开启，0/缺失=关闭）
+            locals.put("LogEnabled", 0);
+            if (sc.hasNextLine()) {
+                String s = sc.nextLine().trim();
+                locals.put("LogEnabled", "1".equals(s) ? 1 : 0);
+            }
         }
     }
 
@@ -1385,6 +1443,7 @@ public class Main {
             fw.write(getLocal("Theme", 0) + "\n");
             fw.write(mirrorDomain == null ? "" : mirrorDomain + "\n");
             fw.write(checkUpdateOnStart + "\n");
+            fw.write(getLocal("LogEnabled", 0) + "\n");
         }
     }
 

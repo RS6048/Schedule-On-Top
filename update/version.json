@@ -1,6 +1,6 @@
 {
-  "version": "1.8.0",
-  "note": "版本号改为硬编码（移除 version.txt，版本随源码编译、重启生效）；新增“启动时检查更新”开关（存于 data/.local 第 7 行，设置面板可勾选，关闭后启动不再自动检查，仍可手动点“检查更新”）；其余保持：下载清单以远端 version.json 为准、单条 404 跳过、load/tick 脚本内存缓存与整文件校验、NoticeWindow 白底黑字无圆角、admcmd 管理员命令",
+  "version": "1.8.3",
+  "note": "版本号升至 1.8.3；新增日志功能（输出到根目录 log/，设置面板“开启log”默认关闭，过时日志自动压缩为 .gz）；新增重启入口 run.bat 与编译打包脚本 createJar.bat，缺失时程序自动创建，更新时自动调用；新增命令文件 startup.txt（与 load.txt/tick.txt 地位等价，每个进程生命周期仅首次启动执行 1 次）",
   "files": [
     "src/Main.java",
     "src/MainWindow.java",
@@ -14,7 +14,10 @@
     "src/IniFileReader.java",
     "src/FrameTray.java",
     "src/UpdateChecker.java",
+    "src/Log.java",
     "src/META-INF/MANIFEST.MF",
-    "BuildJar.bat"
+    "BuildJar.bat",
+    "createJar.bat",
+    "run.bat"
   ]
 }

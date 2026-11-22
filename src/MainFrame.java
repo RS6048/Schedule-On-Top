@@ -125,6 +125,7 @@ public class MainFrame extends JFrame implements ActionListener {
     private final JCheckBox nightStudyCheck = new JCheckBox("晚自习");
     private final JCheckBox aprilFoolCheck = new JCheckBox("愚人节彩蛋");
     private final JCheckBox updateOnStartCheck = new JCheckBox("启动时检查更新");
+    private final JCheckBox logCheck = new JCheckBox("开启log");
     private final JLabel dateRangeLabel = new JLabel("", SwingConstants.CENTER);
     /** 换课模式预览周次（只预览不写入 .local；0 = 未初始化，reload 时取当前真实周次）。 */
     private int previewWeekTurn = 0;
@@ -312,6 +313,12 @@ public class MainFrame extends JFrame implements ActionListener {
         updateOnStartCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         updateOnStartCheck.addActionListener(e -> saveLocalSettings());
 
+        logCheck.setAlignmentX(Component.CENTER_ALIGNMENT);
+        logCheck.setOpaque(false);
+        logCheck.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        logCheck.setToolTipText("日志输出到程序根目录 log/，按天分文件，过时日志自动压缩");
+        logCheck.addActionListener(e -> saveLocalSettings());
+
         // 课程管理 / 命令测试按钮（时段/周六/晚自习编辑已并入编辑模式网格）
         JButton[] settingBtns = {courseManageBtn, testCmdBtn};
         for (JButton b : settingBtns) {
@@ -341,6 +348,7 @@ public class MainFrame extends JFrame implements ActionListener {
         tabSettings.add(nightStudyCheck);
         tabSettings.add(aprilFoolCheck);
         tabSettings.add(updateOnStartCheck);
+        tabSettings.add(logCheck);
         tabSettings.add(Box.createVerticalStrut(10));
         tabSettings.add(separator());
         tabSettings.add(Box.createVerticalStrut(10));
@@ -498,6 +506,7 @@ public class MainFrame extends JFrame implements ActionListener {
         nightStudyCheck.setSelected(Main.getLocal("HasNightStudy", 0) == 1);
         aprilFoolCheck.setSelected(Main.getLocal("AprilFool", 0) == 1);
         updateOnStartCheck.setSelected(Main.checkUpdateOnStart == 1);
+        logCheck.setSelected(Main.getLocal("LogEnabled", 0) == 1);
         hueSelector.setValue(Main.getLocal("Theme", 0));
 
         refreshCourseCombo();
@@ -557,17 +566,20 @@ public class MainFrame extends JFrame implements ActionListener {
     }
 
     /**
-     * 保存本地设置（晚自习、愚人节、启动时检查更新开关）。
+     * 保存本地设置（晚自习、愚人节、启动时检查更新、开启log 开关）。
      */
     private void saveLocalSettings() {
         Main.locals.put("HasNightStudy", nightStudyCheck.isSelected() ? 1 : 0);
         Main.locals.put("AprilFool", aprilFoolCheck.isSelected() ? 1 : 0);
         Main.checkUpdateOnStart = updateOnStartCheck.isSelected() ? 1 : 0;
+        Main.locals.put("LogEnabled", logCheck.isSelected() ? 1 : 0);
         try {
             Main.saveLocals();
+            Log.setEnabled(logCheck.isSelected());
             System.out.println("[MainFrame] 本地设置已保存: 晚自习=" + nightStudyCheck.isSelected()
                     + ", 愚人节=" + aprilFoolCheck.isSelected()
-                    + ", 启动时检查更新=" + (Main.checkUpdateOnStart == 1));
+                    + ", 启动时检查更新=" + (Main.checkUpdateOnStart == 1)
+                    + ", 开启log=" + logCheck.isSelected());
         } catch (IOException ex) {
             Main.outputException(ex);
         }

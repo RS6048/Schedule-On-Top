@@ -58,6 +58,7 @@
 | 文件 | 触发时机 | 说明 |
 |------|----------|------|
 | `load.txt` | 每次 `reload()` | 自动加载执行，用于初始化变量、设置课表、调用 `run <文件>` 执行其他命令 |
+| `startup.txt` | 每次程序启动（进程生命周期内仅 1 次） | 首次启动时**先于** `load.txt` 执行，共享同一上下文；后续 reload 不再重复执行 |
 | `tick.txt` | 每次更新循环 | 基于 reload 基础上下文**拷贝**独立执行，每次从基准状态开始（`addblock` 不会跨 tick 累积）；防重入（上一次未跑完跳过本次） |
 | 其他 `.txt` | 不自动执行 | 需在脚本中用 `run <文件名>` 显式调用，否则忽略 |
 
@@ -147,7 +148,7 @@ addblock 1 today is $date$
 
 ### 脚本文件
 - 脚本放置于 `./commands/` 目录，后缀 **`.txt`**（旧 `.sscm` 后缀不再支持）
-- 仅 `load.txt`（每次 reload）与 `tick.txt`（每次更新）自动执行；其他文件用 `run <文件名>` 显式调用
+- 仅 `startup.txt`（每次进程启动 1 次）、`load.txt`（每次 reload）与 `tick.txt`（每次更新）自动执行；其他文件用 `run <文件名>` 显式调用
 - `cmd` 命令为异步执行，输出打印到控制台（`[sscm-cmd]` 前缀）
 - 键鼠命令需要图形桌面环境（headless 环境不可用）；需要提示时用 `splashscreen on` 显式显示幕布
 
@@ -293,8 +294,9 @@ endif
 1. 正常读取 schedule.txt / saturday.txt / delay 当天课表
 2. 单双周课程解析
 3. **换课数据文件 data/swap.txt 应用**（两行一组，`yyyy@mm@dd@名`，按名称定位 token 互换）
-4. **load.txt 脚本执行**（`setcourse`/`replace` 等课表修改）
-5. 添加自习、晚自习标记（`[~]` 与时间段由排字组统一追加）
+4. **startup.txt 脚本执行**（仅进程首次启动，先于 load.txt）
+5. **load.txt 脚本执行**（`setcourse`/`replace` 等课表修改）
+6. 添加自习、晚自习标记（`[~]` 与时间段由排字组统一追加）
 
 即：换课数据文件是基础替换（作用于延迟课表之后、load.txt 脚本之前）；
 load.txt 的课表修改在其后生效。
@@ -397,3 +399,34 @@ load.txt 的课表修改在其后生效。
   （`.local` 格式扩展：前 5 行整数 + 第 6 行镜像域名文本），**无保存按钮**
 - 留空 = 默认 GitHub raw 直连；默认地址失败时自动依次尝试 ghproxy 前缀
 - 输入容错：自动剥离 `http(s)://` 协议前缀与尾部斜杠；`data/mirror.txt` 已废弃
+
+---
+
+## 五、日志 / 构建脚本 / startup.txt（v1.8.3）
+
+### 1. 日志功能
+- 日志目录：程序（`sc.jar`）根目录下的 `log/`，按天分文件 `yyyy-MM-dd.log`
+- 开关：设置 → 本地设置 → **开启log**，默认**关闭**；勾选即时生效，无需重启
+- 持久化：`data/.local` 第 8 行（`1`=开启，`0`/缺失=关闭）
+- 开启后 `System.out` / `System.err` 同时写控制台与当天日志文件，现有输出无需改动
+- 自动压缩：每次启动把**今天之前**的 `yyyy-MM-dd.log` 压成 `.log.gz` 并删除原文件；
+  文件名不是合法日期的 `.log` 保持不动
+
+### 2. 根目录脚本
+| 文件 | 用途 | 缺失时 |
+|------|------|--------|
+| `run.bat` | 重启入口（优先 `sc.jar`，否则 `out/production/ScrollSched`） | 程序自动创建 |
+| `createJar.bat` | 编译 `src/*.java` 到 `out/production/ScrollSched` 并打包 `sc.jar` | 程序自动创建 |
+
+- 自动更新流程：下载文件 → 调用 `createJar.bat` 编译打包 → 成功后清理 `src/`、`out/` →
+  调用 `run.bat` 重启并退出当前进程
+- `createJar.bat` 优先使用 `%JAVA_HOME%`，其次 `%ProgramFiles%\Java\jdk*`、
+  `%ProgramFiles%\Eclipse Adoptium\jdk*`，最后回退 PATH 中的 `javac`/`jar`
+- 退出码：`0` 成功 / `1` 编译或打包失败 / `2` 缺少 `src` 或找不到 `javac`
+
+### 3. startup.txt
+- 位置：`data/commands/startup.txt`（不存在时自动创建说明模板）
+- 地位与 `load.txt` / `tick.txt` 等价，语法完全相同
+- 触发时机：**每次进程启动只执行 1 次**，在首次 `load.txt` 之前、共享同一上下文，
+  因此其中设置的内容对随后的 `load.txt` 可见
+- 同一进程内后续 reload（改设置、换周次等）不会重复执行
